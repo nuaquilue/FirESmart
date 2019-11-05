@@ -1,0 +1,187 @@
+LSEVENT: AllocAgri
+
+DEFINITIONS
+	LAYER: LCM, TSChg, TransType, TransPot_Agri
+	LAYER: AdminRegion, SlopeDegree, Elevation, Interface
+	GLOBAL CONSTANT: DaysPerYr, HaPerCell
+	GLOBAL VARIABLE: TimeStep, TimeStepLUChg  
+	GLOBAL CONSTANT: Demand[], NumAdmin, Agri, Crop, Shrub
+	GLOBAL CONSTANT: Urb, Crp, Shrb, Frst, Oth, UrbCrp, UrbShrb, UrbFrst, CrpShrb, CrpFrst, ShrbFrst	 	// From Interface
+	GLOBAL VARIABLE: remDemand[], trgtDemand[]
+	GLOBAL VARIABLE: TransPotOpt_Agri, LigniAgri, LsprdAgri, KAgri
+	GLOBAL VARIABLE: SlopeForCrop, ElevForCrop		
+	LOCAL: aChgPerAdmnRegion[NumAdmin+1]
+	EVENT VARIABLE: remDmnd, currStep, LCTransition, nActive, maxActive
+	CLUSTER VARIABLE: PatchSize, WaitTimeIgni, WaitTimeSprd
+	CELL VARIABLE: WaitTime
+	OUTPUT VARIABLE: LChgFile = LCTransition.Agri.txt 
+//	OUTPUT VARIABLE: DemandFile = TestDemandAgri.txt	
+//	OUTPUT VARIABLE: AllocFile = TestAllocAgri.txt	
+ENDDEF
+
+
+
+INITIALSTATE 
+	INITIALSTATE = 1
+	LCTransition = Agri
+	currStep = 0
+	// To control...
+	nActive = 0
+	maxActive = 0
+ENDIS
+
+
+
+RETURNTIME
+	RETURNTIME = IF Time EQ 0 THEN 180 ELSE TimeStepLUChg * DaysPerYr 
+
+	// Track variables: Demand target and remanent 
+	trgtDemand[LCTransition] = Demand[currStep, LCTransition-1]   // in ha
+	remDemand[LCTransition] = trgtDemand[LCTransition]		// in ha
+
+	// Event variable to be decreased as demand gets allcoated (in pixels)
+	remDmnd = ROUND(Demand[currStep, LCTransition-1]/HaPerCell)
+
+	// Suitability-to-change			
+	TransPot_Agri = CLASSIFY(TransPotOpt_Agri)
+						0: (LCM EQ Shrub)
+						1: ROUND(1000*(1/CLAMP(Elevation,1,1000))) * ((Interface EQ Crp) OR (Interface EQ UrbCrp) OR (Interface EQ CrpShrb) OR (Interface EQ CrpFrst)) * (LCM EQ Shrub) * (Elevation >=ElevForCrop) * (SlopeDegree <= SlopeForCrop) 						
+						END
+	/* // Check
+	OUTPUT(DemandFile)
+		Run
+		Year: FLOOR(Time/DaysPerYr) + 1
+		LCTransition
+		Step:currStep+1
+		HaPerCell
+		trgt: trgtDemand[LCTransition]
+		remDmnd  	
+	END  */
+
+	// Clean track variables at each year	
+	aChgPerAdmnRegion[=] 0
+
+	// Use a variable independent of 'Time' to track the step in time 
+	currStep += 1
+ENDRT
+
+
+
+EVENTLOCATION
+	// Allow potential land use changes in any cell except static classes
+	STATIC REGION WHOLE MAP
+	DECISION (LCM EQ Shrub) 
+ENDEL
+
+
+
+NUMCLUSTERS 
+	// Start 1 cluster for each potential change
+	NUMCLUSTERS = remDmnd   
+ENDNC
+
+
+
+PROBINIT
+	// Relative probability of selection
+	PROBINIT = TransPot_Agri // (LCM EQ Shrub) 
+
+	// Initialization of a new potential patch
+	// Set the waiting time for the potential initiation
+	// from an Exponential distribution with Rate = Ligni
+	// but NEGEXP requires the Mean=1/Rate
+	WaitTime = NEGEXP(1/LigniAgri)		
+
+	// Track variables	
+	PatchSize = 0
+	WaitTimeIgni = WaitTime 
+	WaitTimeSprd = 0
+	nActive++
+	maxActive = MAX(nActive, maxActive)
+
+	/* // Check
+	OUTPUT(AllocFile)
+		Run
+		Year: FLOOR(Time/DaysPerYr) + 1
+		LCTransition
+		Step:currStep+1
+		Location
+		LigniAgri
+		WaitTimeIgni
+		maxActive
+	END */
+ENDPI
+
+
+
+TRANSITIONS
+	// To control...
+	IF remDmnd <= 0
+		nActive--
+	END	
+	// Transition occurs while demand is still to be consumed and where changes haven't happened yet
+	TRANSITIONS = (remDmnd > 0) 
+ENDTR
+
+
+SPREADLOCATION
+	// Spread to all 4 neighbours that might chang if there is still Demand to allocate
+	REGION CENTRED(1, 1)
+	DECISION 	IF (remDmnd > 0)  AND (TransType EQ 0)   
+				THEN  (LCM EQ Shrub)*(SlopeDegree <= SlopeForCrop)*(Elevation >= ElevForCrop) 	ELSE FALSE
+				//THEN  (LCM EQ Shrub)*(Elevation >= ElevForCrop) ELSE FALSE
+
+ENDSL
+
+
+
+SPREADPROB
+	// The probability to spread to all potential changing neighbours is equal, 
+	// but assign a waiting time according to (see below):
+	SPREADPROB = 1
+
+	// Waiting time for ignition cells is WaitTime = NEGEXP(Ligni)/100	
+	// but, Waiting time for the spreading cells is :
+	WaitTime = NEGEXP(1/LsprdAgri) * (WaitTimeIgni^KAgri ) 
+
+	// To control..
+	nActive++
+	maxActive = MAX(nActive, maxActive)
+ENDSP
+
+
+
+SPREADTIME
+	// The spreading time depends on the waiting time of the source cell
+	res = 100000
+	WaitTime = ROUND(WaitTime * res) / res  // Round to a given number of decimal places (to reduce queue issues in SELES3.5)
+	SPREADTIME = WaitTime * 0.001
+
+	// We've decided to change --> Do land use transitions here (after spreading, to allow sequencing by wait time
+	// Consequence of spread time is the last thing an active cell does before dying
+	IF (remDmnd > 0)  AND  (LCM EQ Shrub) AND (TransType EQ 0) 
+		TransType = LCTransition
+		TSChg = 0
+		LCM = Crop
+		remDmnd -= 1
+		remDemand[LCTransition] = remDemand[LCTransition] - HaPerCell
+		PatchSize += 1
+		aChgPerAdmnRegion[AdminRegion] = aChgPerAdmnRegion[AdminRegion] + HaPerCell
+	END
+
+	// To control ...
+	nActive--
+ENDST
+
+
+
+ENDEVENT
+	OUTPUT(LChgFile)
+	Run
+	Year: FLOOR(Time/365.25) + 1
+	LCT: LCTransition
+	trgt: trgtDemand[LCTransition]
+	aChg#1:NumAdmin:  aChgPerAdmnRegion[Index]
+	ENDFN	
+	ENDEVENT=TRUE
+ENDEE

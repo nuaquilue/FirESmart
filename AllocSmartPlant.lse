@@ -1,0 +1,179 @@
+LSEVENT: AllocSmartPlant
+
+DEFINITIONS
+	LAYER: LCM, TSChg, TransType, TransPot_SmartPlant, AdminRegion
+	GLOBAL CONSTANT: DaysPerYr, HaPerCell, TimeHorizon
+	GLOBAL VARIABLE: TimeStep, TimeStepLUChg, ActiveSmartPlant  
+	GLOBAL CONSTANT: Demand[], NumAdmin, SmartPlant, Pine, Oak
+	GLOBAL VARIABLE: remDemand[], trgtDemand[]
+	GLOBAL VARIABLE: TransPotOpt_SmartPlant, RateSmartPlant
+	GLOBAL VARIABLE: LigniSmartPlant, LsprdSmartPlant, KSmartPlant
+	LOCAL: aChgPerAdmnRegion[NumAdmin+1]
+	LOCAL: AreaPine
+	EVENT VARIABLE: remDmnd, currStep, LCTransition, nActive, maxActive
+	CLUSTER VARIABLE: PatchSize, WaitTimeIgni, WaitTimeSprd
+	CELL VARIABLE: WaitTime
+	OUTPUT VARIABLE: LChgFile = LCTransition.SmartPlant.txt
+//	OUTPUT VARIABLE: DemandFile = TestDemandSmartPlant.txt
+ENDDEF
+
+
+
+INITIALSTATE 
+	INITIALSTATE = ActiveSmartPlant
+	LCTransition = SmartPlant
+	currStep = 0
+	// To control...
+	nActive = 0
+	maxActive = 0
+ENDIS
+
+
+
+RETURNTIME
+	RETURNTIME = IF Time EQ 0 THEN 90 ELSE TimeStepLUChg * DaysPerYr 
+
+	// Count ha of pines
+	AreaPine = 0
+	OVER REGION WHOLE MAP
+	DECISION (LCM EQ Pine) 
+		AreaPine = AreaPine + HaPerCell	// ha
+	ENDFN
+
+	// Track variables: Demand target and remanent 
+	trgtDemand[LCTransition] = (AreaPine/(TimeHorizon-currStep))*RateSmartPlant
+	remDemand[LCTransition] = trgtDemand[LCTransition]
+
+	// Event variable to be decreased as demand gets allocated in pixels
+	remDmnd = ROUND(trgtDemand[LCTransition]/HaPerCell)
+
+	// Suitability-to-change 
+	TransPot_SmartPlant = CLASSIFY(TransPotOpt_SmartPlant)
+						0: (LCM EQ Pine)
+						END
+
+	/*	// Check
+	dmndHA = trgtDemand[LCTransition]
+	OUTPUT(DemandFile)
+		Run
+		Year: FLOOR(Time/DaysPerYr) + 1
+		LCTransition
+		Step:currStep+1
+		HaPerCell
+		dmndHA
+		dmndPXL: remDmnd 	
+	END */
+
+	// Clean track variables at each year	
+	aChgPerAdmnRegion[=] 0
+
+	// Use a variable independent of 'Time' to track the step in time 
+	currStep += 1
+ENDRT
+
+
+
+EVENTLOCATION
+	// Allow potential land use changes in any cell except static classes
+	STATIC REGION WHOLE MAP
+	DECISION (LCM EQ Pine) 
+ENDEL
+
+
+
+NUMCLUSTERS 
+	// Start 1 cluster for each potential change
+	NUMCLUSTERS = remDmnd   
+ENDNC
+
+
+
+PROBINIT
+	// Relative probability of selection
+	PROBINIT = TransPot_SmartPlant
+
+	// Initialization of a new potential patch
+	// Set the waiting time for the potential initiation
+	// from an Exponential distribution with Rate = Ligni
+	// but NEGEXP requires the Mean=1/Rate
+	WaitTime = NEGEXP(1/LigniSmartPlant)		
+
+	// Track variables	
+	PatchSize = 0
+	WaitTimeIgni = WaitTime 
+	WaitTimeSprd = 0
+	nActive++
+	maxActive = MAX(nActive, maxActive)
+ENDPI
+
+
+
+TRANSITIONS
+	// To control...
+	IF remDmnd <= 0
+		nActive--
+	END	
+	// Transition occurs while demand is still to be consumed and where changes haven't happened yet
+	TRANSITIONS = (remDmnd > 0) 
+ENDTR
+
+
+SPREADLOCATION
+	// Spread to all 4 neighbours that might chang if there is still Demand to allocate
+	REGION CENTRED(1, 1)
+	DECISION 	IF (remDmnd > 0)  AND (TransType EQ 0)   
+				THEN  (LCM EQ Pine) ELSE FALSE
+
+ENDSL
+
+
+
+SPREADPROB
+	// The probability to spread to all potential changing neighbours is equal, 
+	// but assign a waiting time according to (see below):
+	SPREADPROB = 1
+
+	// Waiting time for ignition cells is WaitTime = NEGEXP(Ligni)/100	
+	// but, Waiting time for the spreading cells is :
+	WaitTime = NEGEXP(1/LsprdSmartPlant) * (WaitTimeIgni^KSmartPlant) 
+
+	// To control..
+	nActive++
+	maxActive = MAX(nActive, maxActive)
+ENDSP
+
+
+
+SPREADTIME
+	// The spreading time depends on the waiting time of the source cell
+	res = 100000
+	WaitTime = ROUND(WaitTime * res) / res  // Round to a given number of decimal places (to reduce queue issues in SELES3.5)
+	SPREADTIME = WaitTime * 0.001
+
+	// We've decided to change --> Do land use transitions here (after spreading, to allow sequencing by wait time
+	// Consequence of spread time is the last thing an active cell does before dying
+	IF (remDmnd > 0)  AND  (LCM EQ Pine) AND (TransType EQ 0) 
+		TransType = LCTransition
+		TSChg = 0
+		LCM = Oak
+		remDmnd -= 1
+		remDemand[LCTransition] -= 1
+		PatchSize += 1
+		aChgPerAdmnRegion[AdminRegion] = aChgPerAdmnRegion[AdminRegion] + HaPerCell
+	END
+
+	// To control ...
+	nActive--
+ENDST
+
+
+
+ENDEVENT
+	OUTPUT(LChgFile)
+	Run
+	Year: FLOOR(Time/365.25) + 1
+	LCT: LCTransition
+    aChg#1:NumAdmin:  aChgPerAdmnRegion[Index]
+	ENDFN	
+	ENDEVENT=TRUE
+ENDEE

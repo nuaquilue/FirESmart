@@ -1,0 +1,55 @@
+// Aging for REMAINS
+LSEVENT: Aging
+
+DEFINITIONS
+	GLOBAL CONSTANT: DaysPerYr, HaPerCell
+	GLOBAL VARIABLE: TimeStep
+	LAYER: LCM, TSChg
+	GLOBAL VARIABLE: SppLCArea[]
+	GLOBAL CONSTANT: Water, Urban
+	GLOBAL CONSTANT: TimeHorizon, NumLC
+	OUTPUT VARIABLE: AreaFile = SppLandCoverArea.txt
+
+ENDDEF
+
+
+INITIALSTATE	
+   INITIALSTATE = 1
+ENDIS
+
+
+RETURNTIME
+	// Event scheduled once at the end of the year (time units are in days, TimeStep is in years)
+	RETURNTIME = IF Time EQ 0 THEN 365 ELSE TimeStep * DaysPerYr
+
+	// Sum ha for all dynamic land-cover
+	SppLCArea [=] 0 
+	OVER REGION WHOLE MAP 
+	DECISION (0 < LCM ) 
+		SppLCArea[LCM] = SppLCArea[LCM] + HaPerCell    
+	ENDFN
+	OUTPUT(AreaFile)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		LC#1:NumLC: SppLCArea[Index]
+	ENDFN
+
+ENDRT
+
+
+EVENTLOCATION
+	STATIC REGION WHOLE MAP
+	DECISION (0 < LCM )
+ENDEL
+
+
+TRANSITIONS
+	TRANSITIONS = TRUE 
+	// Increment the Time Since Last Change
+	IF ((LCM  NEQ Water) AND (LCM NEQ Urban)) 
+		TSChg = MIN(TimeHorizon, TSChg+TimeStep)
+	END
+ENDTR
+
+
+

@@ -1,0 +1,162 @@
+// Forest recover (pine and oak) after fire in REMAINS
+LSEVENT: ForestRecover
+
+DEFINITIONS
+	GLOBAL CONSTANT: DaysPerYr, HaPerCell
+	GLOBAL VARIABLE: TimeStep
+	LAYER: LCM, TSChg, TransType
+	GLOBAL VARIABLE: Shrub2Pine[], Shrub2Oak[], PineRecoverRadius, OakRecoverRadius
+	GLOBAL CONSTANT: FirstBurnableClass, LastBurnableClass
+	GLOBAL CONSTANT: TimeHorizon, NumLC	
+	GLOBAL CONSTANT: Shrub, Pine, Oak, ShrubToPine, ShrubToOak, ForestRecover
+	LOCAL: Year, CurrentShrub2Pine, CurrentShrub2Oak
+	LOCAL: nneigh, npine, noak
+	EVENT VARIABLE: TargetPine, TargetOak 
+	OUTPUT VARIABLE: ForestRecoverFile = ForestRecover.txt
+//	OUTPUT VARIABLE: TestFile = TestForestRecover.txt
+ENDDEF
+
+
+INITIALSTATE	
+   INITIALSTATE = 1
+ENDIS
+
+
+RETURNTIME
+	// Event scheduled once at the end of the year (time units are in days, TimeStep is in years)
+	RETURNTIME = IF Time EQ 0 THEN 363 ELSE TimeStep * DaysPerYr
+
+	// Mark the current year		
+	Year = FLOOR(Time/365.25) + 1
+
+	// First count the ShrubToPine and ShrubToOak of the current year
+	CurrentShrub2Pine =  0
+	CurrentShrub2Oak = 0
+	OVER REGION WHOLE MAP
+	DECISION (LCM EQ ShrubToPine) AND (TSChg EQ 0)
+		CurrentShrub2Pine  = CurrentShrub2Pine + 1		// cells
+	ENDFN	
+	OVER REGION WHOLE MAP
+	DECISION (LCM EQ ShrubToOak) AND (TSChg EQ 0)
+		CurrentShrub2Oak  = CurrentShrub2Oak + 1
+	ENDFN	
+
+	// Then, split the ShrubToPine and ShrubToOak of the current year in 8 years
+	OVER INDEX (Year, Year+6) 					 	     	Shrub2Pine[Index] = Shrub2Pine[Index] + ROUND(CurrentShrub2Pine/8)
+		Shrub2Oak[Index] = Shrub2Oak[Index] + ROUND(CurrentShrub2Oak/8)
+	ENDFN
+	Shrub2Pine[Year+7] = Shrub2Pine[Year+7] + CurrentShrub2Pine - ROUND(7*CurrentShrub2Pine/8)
+	Shrub2Oak[Year+7] = Shrub2Oak[Year+7] + CurrentShrub2Oak - ROUND(7*CurrentShrub2Oak/8)
+	
+	// Target (number of cells) to be converted, to pine and oak, respectively
+	TargetPine = 0
+	TargetOak = 0
+	IF (Year-1>0)
+		TargetPine = Shrub2Pine[Year-1]		// n.cells
+		TargetOak =Shrub2Oak[Year-1]			// n.cells
+	END
+
+	OUTPUT(ForestRecoverFile)  // in ha
+		Run
+		Year
+		CurrentShrub2Pine:CurrentShrub2Pine*HaPerCell
+		CurrentShrub2Oak:CurrentShrub2Oak*HaPerCell
+		TargetPine:TargetPine*HaPerCell
+		TargetOak:TargetOak*HaPerCell
+	END
+
+ENDRT
+
+
+EVENTLOCATION
+	STATIC REGION WHOLE MAP
+	DECISION  (LCM>0) 
+ENDEL
+
+
+TRANSITIONS
+
+	TRANSITIONS = ((LCM EQ ShrubToPine) OR (LCM EQ ShrubToOak)) AND ((TargetPine > 0 ) OR (TargetOak > 0))
+
+	IF (LCM EQ ShrubToPine) AND (TargetPine > 0)
+
+		// Count pines in a circular neighborhood 
+		nneigh = 0
+		npine = 0
+		OVER REGION CENTRED (1, PineRecoverRadius)
+		DECISION (LCM >0)
+			nneigh = nneigh + 1
+		END
+		OVER REGION CENTRED (1, PineRecoverRadius)
+		DECISION (LCM EQ Pine)  // current land-cover is Pine, that is, it hasn't been burnt, otherwise it will be Shurb, Rocky or Shrub2Oak
+			npine = npine + 1 
+		ENDFN 
+
+		// If succession is happening, then:
+		p = (UNIFORM(0.001,1))^(1/5)  
+		IF (p <= npine/nneigh)
+			LCM = Pine
+			TransType = ForestRecover
+			TSChg = 0
+			TargetPine = TargetPine - 1
+			/*	// Check
+			OUTPUT(TestFile)
+			Run
+			Year
+			Location
+			nneigh
+			npine
+			noak: 0
+			p
+			LCM
+			TSChg
+			TargetPine
+			TargetOak
+			ENDFN	*/
+		ENDFN
+
+	ENDFN
+
+	
+	IF (LCM EQ ShrubToOak) AND (TargetOak > 0)
+
+		// Count oaks in a circular neighborhood 
+		nneigh = 0
+		noak = 0
+		OVER REGION CENTRED (1, OakRecoverRadius)
+		DECISION (LCM >0)
+			nneigh = nneigh + 1
+		END
+		OVER REGION CENTRED (1, OakRecoverRadius)
+		DECISION (LCM EQ Oak)  // current land-cover is Pine, that is, it hasn't been burnt, otherwise it will be Shurb, Rocky or Shrub2Oak
+			noak = noak + 1 
+		ENDFN 
+
+		// If succession is happening, then:
+		p = (UNIFORM(0.001,1))^(1/5)  
+		IF (p <= noak/nneigh)
+			LCM = Oak
+			TransType = ForestRecover
+			TSChg = 0
+			TargetOak = TargetOak - 1
+			/*	// Check
+			OUTPUT(TestFile)
+			Run
+			Year
+			Location
+			nneigh
+			npine: 0
+			noak
+			p		
+			LCM
+			TSChg
+			TargetPine
+			TargetOak
+			ENDFN	*/
+		ENDFN
+
+	ENDFN
+
+ENDTR
+
+

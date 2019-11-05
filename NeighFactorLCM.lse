@@ -1,0 +1,227 @@
+/*********
+	Compute Neighborhood factor for each Land Cover Type following Verburg et al. 2004
+
+	F.i.k.d = (n.k.d.i / n.d.i) / (N.k / N)
+
+	F.i.k.d characterizes the enrichment of neighbourhood d of location i with land use type k. 
+	n.k.d.i is the number of cells of land use type k in the neighbourhood d of cell i
+	n.d.i the total number of cells in the neighbourhood 
+	N.k is the number of cells with land use type k in the whole raster  
+	N all cells in the raster
+
+	Two alternatives: squared neighbourhood versus a circle-based
+
+	OVER REGION CENTRED(0, rad, EUCLIDEAN)  --> includes center cell
+	OVER REGION CENTRED(1, rad)  --> doesn't inclued it
+	OVER REGION CENTRED(0, rad, CARDINAL)  --> the distance between two cells is the minimum number
+									              of up - down - left - right steps
+	OVER REGION RECT(bottomlim, leftlim, toplim, rightlim)  --> it includes central cell
+			// the 4 arguments define the limits of the rectangular region
+
+*********/
+
+LSEVENT: NeighFactorLCM
+
+DEFINITIONS
+	GLOBAL VARIABLE: TimeStep
+	LAYER: LCM
+	LAYER: NF_Crop, NF_Shrub, NF_Pine, NF_Oak, NF_Rocky, NF_Urban
+	GLOBAL VARIABLE: RadiusLCM
+	GLOBAL CONSTANT: CellWidth, DaysPerYr, NumLC
+	GLOBAL CONSTANT: Crop, Shrub, Pine, Oak, Rocky, Urban 
+	LOCAL: SizeArea, CountLCM[NumLC+1]
+	LOCAL: NNeighLCM, NNeighCrop, NNeighShrub, NNeighPine, NNeighOak, NNeighRocky, NNeighUrban
+	LOCAL: maxCrop, maxShrub, maxPine, maxOak, maxRocky, maxUrban
+	EVENT VARIABLE: rad
+	CELL VARIABLE: r, c, bottomlim, leftlim, toplim, rightlim 
+	OUTPUT VARIABLE: NeighFactorFile = NeighFactor_LCM.txt
+	OUTPUT VARIABLE: TestSetFile = TestNFini_LCM.txt
+	OUTPUT VARIABLE: TestNFFile = TestNF_LCM.txt
+ENDDEF
+
+
+INITIALSTATE 
+	INITIALSTATE = 1
+	rad = RadiusLCM/CellWidth 		// = 600/30=20
+ENDIS 
+
+
+EVENTLOCATION
+	STATIC REGION WHOLE MAP
+	DECISION (LCM > 0) 
+ENDEL
+
+
+RETURNTIME
+	RETURNTIME = IF Time EQ 0 THEN 2 ELSE TimeStep * DaysPerYr    //TimeStepLUChg  
+	// Clean layers
+	OVER REGION WHOLE MAP 
+	DECISION (LCM > 0) 
+		NF_Crop = 0
+		NF_Shrub = 0
+		NF_Pine = 0
+		NF_Oak = 0
+		NF_Rocky = 0
+		NF_Urban = 0
+	END
+	// Sum pixels (not ha) for each LCM
+	SizeArea = 0
+	CountLCM[=] 0
+	OVER REGION WHOLE MAP 
+	DECISION (LCM > 0) 
+		SizeArea = SizeArea + 1  				
+		CountLCM[LCM] = CountLCM[LCM] + 1 	
+	ENDFN
+
+//	 Check
+	OUTPUT(TestSetFile)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		RadiusLCM
+		CellWidth
+		rad
+		SizeArea
+		C: CountLCM[Crop]
+		S: CountLCM[Shrub]
+		P: CountLCM[Pine]
+		O: CountLCM[Oak]
+		R: CountLCM[Rocky]
+		U: CountLCM[Urban]
+	END		
+
+
+ENDRT
+
+TRANSITIONS
+
+	TRANSITIONS = TRUE 
+
+	// To define the limits of the rectangular region
+	r = ROW(Location)
+	c = COL(Location)
+	bottomlim = MAX(0,r-rad)
+	leftlim = MAX(0,c-rad)
+	toplim = MIN(NUMROWS-1, r+rad)
+	rightlim = MIN(NUMCOLS-1,c+rad)
+
+	// Initialize the counting variables by discount the center cell
+	NNeighLCM = -1*(0 < LCM ) 
+	NNeighCrop = -1*(LCM  EQ Crop)
+	NNeighShrub = -1*(LCM  EQ Shrub)
+	NNeighPine = -1*(LCM  EQ Pine)
+	NNeighOak= -1*(LCM  EQ Oak)
+	NNeighRocky = -1*(LCM  EQ Rocky)
+	NNeighUrban = -1*(LCM  EQ Urban)
+
+	// Neighbours 
+	OVER REGION RECT(bottomlim, leftlim, toplim, rightlim) 
+	DECISION  (0 < LCM ) 			
+		NNeighLCM = NNeighLCM + 1
+		NNeighCrop = NNeighCrop + (LCM  EQ Crop)
+		NNeighShrub = NNeighShrub + (LCM  EQ Shrub)
+		NNeighPine = NNeighPine + (LCM  EQ Pine) 
+		NNeighOak = NNeighOak + (LCM  EQ Oak) 
+		NNeighRocky = NNeighRocky + (LCM  EQ Rocky) 
+		NNeighUrban = NNeighUrban + (LCM  EQ Urban) 
+	END
+
+	// NeighFac layers, multiply by a factor of 100 (precision)
+	IF (NNeighLCM>0) 			
+		NF_Crop = ROUND ( 100* (NNeighCrop/NNeighLCM) / (CountLCM[Crop]/SizeArea) )
+		NF_Shrub = ROUND ( 100*(NNeighShrub/NNeighLCM) / (CountLCM[Shrub]/SizeArea) )
+		NF_Pine = ROUND ( 100*(NNeighPine/NNeighLCM) / (CountLCM[Pine]/SizeArea) )
+		NF_Oak = ROUND ( 100*(NNeighOak/NNeighLCM) / (CountLCM[Oak]/SizeArea) )
+		NF_Rocky = ROUND ( 100*(NNeighRocky/NNeighLCM) / (CountLCM[Rocky]/SizeArea) )
+		NF_Urban = ROUND ( 100*(NNeighUrban/NNeighLCM) / (CountLCM[Urban]/SizeArea) )
+	END
+	
+	// Check
+	OUTPUT(TestNFFile)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		Location
+		r
+		c
+		LCM		
+		SizeArea
+		C: CountLCM[Crop]
+		S: CountLCM[Shrub]
+		P: CountLCM[Pine]
+		O: CountLCM[Oak]
+		R: CountLCM[Rocky]
+		U: CountLCM[Urban]
+		NNeighLCM
+		NNeighCrop
+		NNeighShrub
+		NNeighPine
+		NNeighOak
+		NNeighRocky
+		NNeighUrban
+		NF_Crop
+		NF_Shrub
+		NF_Pine
+		NF_Oak
+		NF_Rocky
+		NF_Urban
+	END		
+ENDTR
+
+ENDEVENT
+
+	// Find the maxium to rescale NF	
+	maxCrop = 1
+	maxShrub = 1
+	maxPine = 1
+	maxOak = 1
+	maxRocky = 1
+	maxUrban = 1
+	OVER REGION WHOLE MAP 
+	DECISION (LCM > 0) 
+		maxCrop = MAX(maxCrop, NF_Crop)
+		maxShrub = MAX(maxShrub, NF_Shrub)
+		maxPine = MAX(maxPine, NF_Pine)
+		maxOak = MAX(maxOak, NF_Oak)
+		maxRocky = MAX(maxRocky, NF_Rocky)
+		maxUrban = MAX(maxUrban, NF_Urban)
+	ENDFN
+
+	// NeighFac layers rescaled at [0,100] 
+	OVER REGION WHOLE MAP
+	DECISION (LCM > 0) 
+		NF_Crop = ROUND(100*(NF_Crop / maxCrop))
+		NF_Shrub = ROUND(100*(NF_Shrub / maxShrub))
+		NF_Pine= ROUND(100*(NF_Pine / maxPine))
+		NF_Oak = ROUND(100*(NF_Oak / maxOak))
+		NF_Rocky= ROUND(100*(NF_Rocky / maxRocky))
+		NF_Urban= ROUND(100*(NF_Urban / maxUrban))
+	ENDFN
+
+	OUTPUT(NeighFactorFile)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		rad
+		SizeArea	
+		maxCrop 
+		maxShrub 
+		maxPine
+		maxOak
+		maxRocky
+		maxUrban
+		C: CountLCM[Crop]
+		S: CountLCM[Shrub]
+		P: CountLCM[Pine]
+		O: CountLCM[Oak]
+		R: CountLCM[Rocky]
+		U: CountLCM[Urban]
+		pctC: CountLCM[Crop]/SizeArea
+		pctS: CountLCM[Shrub]/SizeArea
+		pctP: CountLCM[Pine]/SizeArea
+		pctO: CountLCM[Oak]/SizeArea
+		pctR: CountLCM[Rocky]/SizeArea
+		pctU: CountLCM[Urban]/SizeArea
+	ENDFN
+
+	ENDEVENT = TRUE
+
+ENDEE
+

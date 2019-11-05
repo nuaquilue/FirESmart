@@ -1,0 +1,200 @@
+/*********
+	Compute Neighborhood factor for each Land Cover Type following Verburg et al. 2004
+
+	F.i.k.d = (n.k.d.i / n.d.i) / (N.k / N)
+
+	F.i.k.d characterizes the enrichment of neighbourhood d of location i with land use type k. 
+	n.k.d.i is the number of cells of land use type k in the neighbourhood d of cell i
+	n.d.i the total number of cells in the neighbourhood 
+	N.k is the number of cells with land use type k in the whole raster  
+	N all cells in the raster
+
+	Two alternatives: squared neighbourhood versus a circle-based
+
+	OVER REGION CENTRED(0, rad, EUCLIDEAN)  --> includes center cell
+	OVER REGION CENTRED(1, rad)  --> doesn't inclued it
+	OVER REGION CENTRED(0, rad, CARDINAL)  --> the distance between two cells is the minimum number
+									              of up - down - left - right steps
+	OVER REGION RECT(bottomlim, leftlim, toplim, rightlim)  --> it includes central cell
+			// the 4 arguments define the limits of the rectangular region
+
+*********/
+
+LSEVENT: NeighFactorInter
+
+DEFINITIONS
+	GLOBAL VARIABLE: TimeStep
+	LAYER: Interface, StudyArea
+	LAYER: NF_Nat, NF_UrbCrp, NF_UrbNat, NF_CrpNat
+	GLOBAL VARIABLE: RadiusInter
+	GLOBAL CONSTANT: CellWidth, DaysPerYr, NumInter
+	GLOBAL CONSTANT: Nat, UrbCrp, UrbNat, CrpNat
+	LOCAL: SizeArea, CountInterface[NumInter+1]
+	LOCAL: NNeighInterface, NNeighNat, NNeighUrbCrp, NNeighUrbNat, NNeighCrpNat
+	LOCAL: maxNat, maxUrbCrp, maxUrbNat, maxCrpNat
+	EVENT VARIABLE: rad
+	CELL VARIABLE: r, c, bottomlim, leftlim, toplim, rightlim 
+	OUTPUT VARIABLE: NeighFactorFile = NeighFactor_Inter.txt
+/*	OUTPUT VARIABLE: TestSetFile = TestNFini_Inter.txt
+	OUTPUT VARIABLE: TestNFFile = TestNF_Inter.txt	*/
+ENDDEF
+
+
+INITIALSTATE 
+	INITIALSTATE = 1
+	rad = RadiusInter/CellWidth 		// = 3000/30=100
+ENDIS 
+
+
+RETURNTIME
+	RETURNTIME = IF Time EQ 0 THEN 3 ELSE TimeStep * DaysPerYr 
+	// Clean layers
+	OVER REGION WHOLE MAP 
+	DECISION (Interface > 0) 
+		NF_Nat = 0
+		NF_UrbCrp = 0
+		NF_UrbNat = 0
+		NF_CrpNat = 0
+	END
+	// Sum pixels (not ha) for each Interface
+	SizeArea = 0
+	CountInterface[=] 0
+	OVER REGION WHOLE MAP 
+	DECISION (Interface > 0) 
+		SizeArea = SizeArea + 1  				
+		CountInterface[Interface] = CountInterface[Interface] + 1 	
+	ENDFN
+
+	/*	// Check
+	OUTPUT(TestSetFile)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		RadiusInter
+		CellWidth
+		rad
+		SizeArea
+		C: CountInterface[Nat]
+		UC: CountInterface[UrbCrp]
+		UN: CountInterface[UrbNat]
+		CN: CountInterface[CrpNat]
+	END	*/	
+
+ENDRT
+
+
+EVENTLOCATION
+	STATIC REGION WHOLE MAP
+	DECISION (StudyArea >0 )  //(Interface > 0) 
+ENDEL
+
+
+TRANSITIONS
+
+	TRANSITIONS = TRUE
+
+	// To define the limits of the rectangular region
+	r = ROW(Location)
+	c = COL(Location)
+	bottomlim = MAX(0,r-rad)
+	leftlim = MAX(0,c-rad)
+	toplim = MIN(NUMROWS-1, r+rad)
+	rightlim = MIN(NUMCOLS-1,c+rad)
+
+	// Initialize the counting variables by discount the center cell
+	NNeighInterface = -1*(0 < Interface ) 
+	NNeighNat = -1*(Interface  EQ Nat)
+	NNeighUrbCrp = -1*(Interface  EQ UrbCrp)
+	NNeighUrbNat = -1*(Interface  EQ UrbNat)
+	NNeighCrpNat= -1*(Interface  EQ CrpNat)
+
+	// Neighbours 
+	OVER REGION RECT(bottomlim, leftlim, toplim, rightlim) 
+	DECISION  (0 < Interface ) 			
+		NNeighInterface = NNeighInterface + 1
+		NNeighNat = NNeighNat + (Interface  EQ Nat)
+		NNeighUrbCrp = NNeighUrbCrp + (Interface  EQ UrbCrp)
+		NNeighUrbNat = NNeighUrbNat + (Interface  EQ UrbNat) 
+		NNeighCrpNat = NNeighCrpNat + (Interface  EQ CrpNat) 
+	END
+
+	// NeighFac layers, multiply by a factor of 100 (precision)
+	IF (NNeighInterface>0) 			
+		NF_Nat = ROUND ( 100* (NNeighNat/NNeighInterface) / (CountInterface[Nat]/SizeArea) )
+		NF_UrbCrp = ROUND ( 100*(NNeighUrbCrp/NNeighInterface) / (CountInterface[UrbCrp]/SizeArea) )
+		NF_UrbNat = ROUND ( 100*(NNeighUrbNat/NNeighInterface) / (CountInterface[UrbNat]/SizeArea) )
+		NF_CrpNat = ROUND ( 100*(NNeighCrpNat/NNeighInterface) / (CountInterface[CrpNat]/SizeArea) )
+	END
+	
+	/*	//	 Check
+	OUTPUT(TestNFFile)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		Location
+		r
+		c
+		Interface		
+		N: CountInterface[Nat]
+		UC: CountInterface[UrbCrp]
+		UN: CountInterface[UrbNat]
+		CN: CountInterface[CrpNat]	
+		NNeighInterface
+		NNeighNat
+		NNeighUrbCrp
+		NNeighUrbNat
+		NNeighCrpNat
+		NF_Nat
+		NF_UrbCrp
+		NF_UrbNat
+		NF_CrpNat
+	END		*/	
+
+ENDTR
+
+
+ENDEVENT
+
+	// Find the maxium to rescale NF	
+	maxNat = 1
+	maxUrbCrp = 1
+	maxUrbNat = 1
+	maxCrpNat = 1
+	OVER REGION WHOLE MAP 
+	DECISION (Interface > 0) 
+		maxNat = MAX(maxNat, NF_Nat)
+		maxUrbCrp = MAX(maxUrbCrp, NF_UrbCrp)
+		maxUrbNat = MAX(maxUrbNat, NF_UrbNat)
+		maxCrpNat = MAX(maxCrpNat, NF_CrpNat)
+	ENDFN
+
+	// NeighFac layers rescaled at [0,100] 
+	OVER REGION WHOLE MAP
+	DECISION (Interface > 0) 
+		NF_Nat = ROUND(100*(NF_Nat / maxNat))
+		NF_UrbCrp = ROUND(100*(NF_UrbCrp / maxUrbCrp))
+		NF_UrbNat= ROUND(100*(NF_UrbNat / maxUrbNat))
+		NF_CrpNat = ROUND(100*(NF_CrpNat / maxCrpNat))
+	ENDFN
+
+	OUTPUT(NeighFactorFile)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		rad
+		SizeArea	
+		maxNat 
+		maxUrbCrp 
+		maxUrbNat
+		maxCrpNat
+		N: CountInterface[Nat]
+		UC: CountInterface[UrbCrp]
+		UN: CountInterface[UrbNat]
+		CN: CountInterface[CrpNat]
+		pctN: CountInterface[Nat]/SizeArea
+		pctUC: CountInterface[UrbCrp]/SizeArea
+		pctUN: CountInterface[UrbNat]/SizeArea
+		pctCN: CountInterface[CrpNat]/SizeArea
+	ENDFN
+
+	ENDEVENT = TRUE
+
+ENDEE
+

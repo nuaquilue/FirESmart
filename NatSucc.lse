@@ -1,0 +1,196 @@
+// Natural Succession for REMAINS
+LSEVENT: NatSucc
+
+DEFINITIONS
+	GLOBAL CONSTANT: DaysPerYr, HaPerCell
+	GLOBAL VARIABLE: TimeStep
+	LAYER: LCM, PrevLCM, TSChg, TransType
+	GLOBAL VARIABLE: RewildingTh, ShrubyTh, RateAfforestOak, RateAfforestPine, RateEncroach
+	GLOBAL VARIABLE: EncroachRadius, AfforestOakRadius, AfforestPineRadius
+	GLOBAL CONSTANT: Shrub, Oak, Pine, Rocky, AfforOak, AfforPine, Encro
+	EVENT VARIABLE: TargetAfforestOak, TargetAfforestPine, TargetEncroach
+	LOCAL: RockyShrub, ShrubForest
+	LOCAL: nneigh_oak, nneigh_pine, noak, nshrub, npine
+	LOCAL: AreaAfforOak, AreaAfforPine, AreaEncro
+	OUTPUT VARIABLE: NatSuccFile = NatSucc.txt 
+//	OUTPUT VARIABLE: TestFile = TestNatSucc.txt
+ENDDEF
+
+
+INITIALSTATE	
+   INITIALSTATE = 1
+ENDIS
+
+
+RETURNTIME
+	// Event scheduled once at the end of the year (time units are in days, TimeStep is in years)
+	RETURNTIME = IF Time EQ 0 THEN 364 ELSE TimeStep * DaysPerYr
+
+	// Count available shrublands and rocky vegetation that can become oak/pine or shrub respectively (n.cells)
+	ShrubForest =  0
+	RockyShrub = 0
+	OVER REGION WHOLE MAP
+	DECISION (LCM EQ Shrub) AND (TSChg > RewildingTh)
+		ShrubForest  = ShrubForest + 1		
+	ENDFN	
+	OVER REGION WHOLE MAP
+	DECISION (LCM EQ Rocky) AND (TSChg > ShrubyTh)
+		RockyShrub  = RockyShrub + 1
+	ENDFN	
+
+	// According to the annual rates, determine the target for each transition
+	TargetAfforestOak = ROUND(ShrubForest*RateAfforestOak/100) 	// n.cells
+	TargetAfforestPine = ROUND(ShrubForest*RateAfforestPine/100) 	// n.cells
+	TargetEncroach = ROUND(RockyShrub*RateEncroach/100)	// n.cells
+
+	// To track the area changed
+	AreaAfforOak = 0
+	AreaAfforPine = 0
+	AreaEncro = 0
+
+ENDRT
+
+
+EVENTLOCATION
+	STATIC REGION WHOLE MAP
+	DECISION ((LCM EQ Shrub) OR (LCM EQ Rocky)) 
+ENDEL
+
+
+
+TRANSITIONS
+
+	TRANSITIONS =  ((LCM EQ Shrub) OR (LCM EQ Rocky)) AND (TargetAfforestOak+TargetAfforestPine+TargetEncroach>0) 
+
+
+	// AFFORESTATION from Shrub to Oak according to neigbour forest species		
+	IF (LCM EQ Shrub) AND (TSChg > RewildingTh) AND (TargetAfforestOak>0) AND (UNIFORM(1,100)<=3*RateAfforestOak)
+
+		// Count oaks within a circular neighborhood and the size of this neighborhood
+		nneigh_oak = 0
+		noak = 0
+		OVER REGION CENTRED (1, AfforestOakRadius)
+		DECISION (LCM >0)
+			nneigh_oak = nneigh_oak + 1
+		END
+		OVER REGION CENTRED (1, AfforestOakRadius)
+		DECISION (LCM EQ Oak)  // current land-cover is Oak, that is, it hasn't been burnt, otherwise it will be Shurb, Rocky or ShrubForest
+			noak = noak + 1 
+		END 
+
+		// If succession is happening, then:
+		p = UNIFORM(0.001,1)
+		IF ((p <= (noak/nneigh_oak)^(1/5)) AND (TargetAfforestOak>0))
+			LCM = Oak
+			TransType = AfforOak
+			TSChg = 0
+			TargetAfforestOak = TargetAfforestOak - 1
+			AreaAfforOak = AreaAfforOak + HaPerCell
+		ENDFN
+	ENDFN
+
+	// AFFORESTATION from Shrub to Pine according to neigbour forest species		
+	IF (LCM EQ Shrub) AND (TSChg > RewildingTh) AND (TargetAfforestPine>0) AND (UNIFORM(1,100)<=4*RateAfforestPine)
+
+		// Count pines in a circular neighborhood 
+		nneigh_pine = 0
+		npine = 0
+		OVER REGION CENTRED (1, AfforestPineRadius)
+		DECISION (LCM >0)
+			nneigh_pine = nneigh_pine + 1
+		END
+		OVER REGION CENTRED (1, AfforestPineRadius)
+		DECISION (LCM EQ Pine)  // current land-cover is Pine, that is, it hasn't been burnt, otherwise it will be Shurb, Rocky or ShrubForest
+			npine = npine + 1 
+		END 
+
+		// If succession is happening, then:
+		p = UNIFORM(0.001,1)
+		IF ((p <= (npine/nneigh_pine)^(1/5)) AND (TargetAfforestPine>0) AND (TSChg>0))
+			LCM = Pine
+			TransType = AfforPine
+			TSChg = 0
+			TargetAfforestPine = TargetAfforestPine - 1
+			AreaAfforPine = AreaAfforPine + HaPerCell
+		ENDFN
+	ENDFN
+
+
+	// VEGETATION ENCROACHMENT from Rocky areas to Shrub 
+	IF (LCM EQ Rocky) AND (TSChg > ShrubyTh) AND (TargetEncroach > 0) AND (UNIFORM(1,100)<=4*RateEncroach)
+
+		// Count shrubs in a circular neighborhood 
+		nneigh = 0
+		nshrub = 0
+		OVER REGION CENTRED (1, EncroachRadius)
+		DECISION (LCM >0)
+			nneigh = nneigh + 1
+		END
+		OVER REGION CENTRED (1, EncroachRadius)
+		DECISION (PrevLCM EQ Shrub)	// shrub already stablished, not coming from post-fire regeneration
+			nshrub = nshrub + 1 
+		ENDFN 
+
+		// If succession is happening, then:
+		p = UNIFORM(0.001,1)
+		IF (p <= (nshrub/nneigh)^(1/5))
+			LCM = Shrub
+			TransType = Encro
+			TSChg = 0
+			TargetEncroach = TargetEncroach- 1
+			AreaEncro = AreaEncro + HaPerCell
+		ENDFN
+
+	ENDFN
+
+	// Check
+/*	IF TSChg EQ 0
+	OUTPUT(TestFile)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		TransType
+		TSChg
+		Location	
+//		AfforestRadius	
+//		EncroachRadius
+		noak
+		npine
+		nshrub
+		nneigh		
+		p
+		th_oak: (noak/nneigh)^(1/5)
+		th_pine: (npine/nneigh)^(1/5)
+		th_shrub: (nshrub/nneigh)^(1/5)
+		LCM
+		TargetAfforestOak
+		TargetAfforestPine
+		TargetEncroach
+	ENDFN
+	ENDFN */
+
+ENDTR
+
+
+ENDEVENT
+
+	// Change from Shrub to Oak/Pine and from Rock to Shrub
+	OUTPUT(NatSuccFile)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		PotentialShrub:	ShrubForest*HaPerCell
+		PotentialRocky:	RockyShrub*HaPerCell
+		//RateAfforestOak
+		//RateAfforestPine
+		//RateEncroach
+		TargetAfforestOak: (ShrubForest*RateAfforestOak/100)*HaPerCell
+		TargetAfforestPine: (ShrubForest*RateAfforestPine/100)*HaPerCell
+		TargetEncroach: (RockyShrub*RateEncroach/100)*HaPerCell 
+		AreaAfforOak 
+		AreaAfforPine 
+		AreaEncro 
+	ENDFN
+
+	ENDEVENT=TRUE
+ENDEE
+
+

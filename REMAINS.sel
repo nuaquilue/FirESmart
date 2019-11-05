@@ -1,0 +1,335 @@
+Seles Model  
+Time Units: Day Year 365.25 50*365.25 // 1 time unit means 1 day; 365.25 days per year; default simulation length is 50 years
+
+
+Landscape Events:
+	// Land-cover descriptors
+	Interfaces11.lse DEBUG		// schedule : 1
+//	NeighFactorLCM.lse DEBUG	// schedule : 2 
+//	NeighFactorInter.lse DEBUG	// schedule : 3 
+	// Land-cover transitions		
+//	AllocMarketPlant.lse DEBUG	// schedule : 5	
+	AllocSmartPlant.lse DEBUG	// schedule : 90
+	AllocAgri.lse DEBUG		// schedule : 180
+	AllocRabn.lse DEBUG		// schedule : 270
+	ReportPtchLChg.lse DEBUG	// schedule : 360
+	// Fire and Vegetation Dynamicos
+	Fire.lse 	DEBUG 		// schedule : 361
+	PostFireRege.lse	DEBUG		// schedule : 362
+	ForestRecover.lse	DEBUG		// schedule : 363
+	Afforestation.lse	DEBUG			// schedule : 364
+	Encroachment.lse	DEBUG			// schedule : 364.5
+	Aging.lse	DEBUG			// schedule : 365
+
+
+External Variables:	
+	$Demand$ = "Demand"
+	$AnnualBurntAreaDist_PT$ = "ABAdiscret_PT"
+	$AnnualBurntAreaDist_GZ$ = "ABAdiscret_GZ"
+	$FireSizeDist_PT$ = "FSdiscret_PT" 
+	$FireSizeDist_GZ$ = "FSdiscret_GZ" 
+	$FFstrategy$ = "FFbyAdmin"
+	$SprdRateWeights$ = "SprdRateWeights"
+	$LCFireProneness$ = "LCFireProneness"
+	$ProbIgniMdl$ = "ProbIgniMdl"
+	$PostFireRege$ = "PostFireRege"
+
+
+Legends:
+	// Legend of the Land Cover Forest Map :
+	LCM_legend = inputlyrs\cats\LCM.asc
+	/*	7 categories
+	--------------------	
+		1:CropGrass
+		2:Shrub
+		3:Pine	
+		4:Oak
+		5:RockyShrub
+		6:Water
+		7:Urban	*/
+   
+
+Spatial Constants:
+	// Load input layers, description in defaultLayers.scn
+	StudyArea
+	AdminRegion
+	Elevation
+	Aspect
+	DensRoad
+	SlopeDegree
+	UTM
+
+
+Global Constants: 
+	// Time
+	DaysPerYr = 365
+	// Metric parameters
+	CellWidth = 30 //CELL WIDTH(StudyArea) 		// Cell width in m  -> returns 1 !!
+	HaPerCell = (CellWidth^2) /10000 		// Cell size in ha
+
+	// The following variables are used to define vector dimensions :
+	TimeHorizon = 40 
+	NumAdmin =  MAX(AdminRegion)
+
+	// Transitions: 
+	Fire = 1
+	MarketPlant = 2	// from Shrub to Pine
+	SmartPlant = 3	// from Pine to Oak
+	Agri = 4		// from Shrub to Crop
+	Rabn = 5		// from Crop to Shrub
+	AfforOak = 6		// from Shrub to Oak
+	AfforPine = 7		// from Shrub to Pine
+	Encro = 8		// from Rocky to Shrub
+	ForestRecover = 9	// from Shrub to Pine or Oak because of fire
+	NumTrans = 9  	
+
+	// Dyanmic land-cover types 
+	Crop = 1		
+	Shrub = 2	
+	Pine = 3			
+	Oak = 4		
+	Rocky = 5			
+	Water = 6
+	Urban = 7
+	ShrubToPine = 8
+	ShrubToOak = 9
+	NumLC = 9
+
+	// UTM grid
+	MaxUTM = MAX(UTM)
+	MinUTM = 1
+
+	// 	Categories for the Interfaces layer
+	Urb = 1
+	Crp = 2 
+	Shrb = 3
+	Frst = 4
+	Oth = 5
+	UrbCrp = 6
+	UrbShrb = 7
+	UrbFrst = 8
+	CrpShrb = 9	
+	CrpFrst = 10
+	ShrbFrst = 11
+	// Auxiliars
+	Tot = 12
+	IsMax = 13
+
+	// Alias for forest map classes	
+	FirstBurnableClass = 1	 	// Crops
+	LastBurnableClass = 5 		// Rocky shrubs
+
+	// For suitablity-to-change
+	maxSlope = MAX(SlopeDegree)
+
+
+Spatial Variables:
+
+	// Land cover forest map
+	LCM[0,NumLC+1] <- initialLCM
+	PrevLCM[0,NumLC+1] <- 0
+
+	// Time Since Last Change and Type of Transition
+	TSChg[0, TimeHorizon] <- TimeHorizon
+	TransType[0, NumTrans] <- 0
+	
+	// Interface type
+	Interface[0,Tot] <- 0
+
+/*	// Neighboorhoud factor for LCM categories
+	NF_Urban[-1,100000] <- 0
+	NF_Crop[-1,100000] <- 0
+	NF_Shrub[-1,100000] <- 0	
+	NF_Pine[-1,1000000] <- 0
+	NF_Oak[-1,100000] <- 0
+	NF_Rocky[-1,100000] <- 0
+	// Neighboorhoud factor for Interfaces
+	NF_Nat[-1,100000] <- 0	
+	NF_UrbCrp[-1,3000000] <- 0	
+	NF_UrbNat[-1,3000000] <- 0	
+	NF_CrpNat[-1,1000000] <- 0	
+*/
+	// Suitability-to-change maps 
+	TransPot_MarketPlant[0, 1000] <- 0
+	TransPot_SmartPlant[0, 1000] <- 0
+	TransPot_Agri[0, 1000] <- 0
+	TransPot_Rabn[0, 1000] <- 0
+
+	// Dynamic Probability of Fire Ignition
+	ProbIgnition[100]
+
+	// Fire track layers: Report burnt and suppressed cells, and fire front spreading
+	EffectBurntOrSuppress[6] <- 0	
+	ReceivedFront[1]
+
+	// Identify patches-of-change
+	Visit[1]
+
+	/* TIMES_BURNT	*/
+	TimesBurnt[TimeHorizon]	
+
+	/* // SPREAD_FACTORS
+	SprdRate[100]
+	SprdSlope[100]
+	SprdSppFlam[100]
+	SprdAspc[100]
+	ProbBurn[100]	*/
+
+	/* BURNT_ID 
+	BurntFireId[100000] <- 0 */
+
+
+Global Constants: 
+	// Land-use land-cover change input files
+	Demand = "inputfiles\$Demand$.txt" sequenced
+
+	// Fire regime input files: annual burn and fire size distritbutions
+	BA_PT = "inputfiles\$AnnualBurntAreaDist_PT$.txt" 
+	BA_GZ = "inputfiles\$AnnualBurntAreaDist_GZ$.txt" 
+	FS_PT = "inputfiles\$FireSizeDist_PT$.txt" 
+	FS_GZ = "inputfiles\$FireSizeDist_GZ$.txt" 
+	maxBA_PT = ROWS(BA_PT) 
+	maxBA_GZ = ROWS(BA_GZ)
+	maxFS_PT = ROWS(FS_PT)
+	maxFS_GZ = ROWS(FS_GZ)
+
+	// Load	other input files related to fire
+	FFstrategy = "inputfiles\$FFstrategy$.txt" 
+	LCFireProneness = "inputfiles\$LCFireProneness$.txt"	
+	SprdRateWeights = "inputfiles\$SprdRateWeights$.txt"	
+	ProbIgniModel = "inputfiles\$ProbIgniModel$.txt" // the coefficients of the logistic model
+
+	// Post-fire regeneration  
+	PostFireRege = "inputfiles\$PostFireRege$.txt"
+
+
+Global Variables: 
+
+	// Time parameters (in years)
+	TimeStep = 1 	OFF
+	TimeStepLUChg = 5 OFF
+
+	// Mode of transition potential map for each land-cover change
+	TransPotOpt_MarketPlant = 0	OFF
+	TransPotOpt_SmartPlant = 0	OFF
+	TransPotOpt_Agri = 0		OFF
+	TransPotOpt_Rabn = 0		OFF
+	RateSmartPlant = 1 OFF 	// value between 0 and 1 to indicate the rate of pines to be convert to oaks
+	ActiveSmartPlant = 0 OFF		// Activated (1) or not (0) fire-smart plantation (pine --> oak)
+
+	// Allocation parameters
+	LigniMarketPlant = 1	OFF
+	LsprdMarketPlant = 1	OFF
+	KMarketPlant = 1	OFF
+	LigniSmartPlant = 1	OFF
+	LsprdSmartPlant = 1	OFF
+	KSmartPlant = 1	OFF
+	LigniAgri = 1	OFF
+	LsprdAgri = 1	OFF
+	KAgri = 1	OFF
+	LigniRabn = 1	OFF
+	LsprdRabn = 1	OFF
+	KRabn = 1	OFF	
+
+	// Track variables for Land-cover changes
+	patchList[NumLC+1] = 0 OFF   // list variable
+	remDemand[NumLC+1] = 0
+	trgtDemand[NumLC+1] = 0
+	ChangeCount[NumLC+1,NumLC+1] = 0 // from/to
+	ChangeCountPotentialIgni[NumLC+1,NumLC+1] = 0 // from/to
+	ChangeCountPotentialSprd[NumLC+1,NumLC+1] = 0 // from/to
+	numPtchList[NumLC+1] = 0
+	sumPtchList[NumLC+1] = 0
+	meanPtchList[NumLC+1] = 0
+	sdPtchList[NumLC+1] = 0
+
+/*	// Neighbourhood factor
+	RadiusLCM = 3000 	OFF	// in m
+	RadiusInter = 3000 	OFF	// in m
+*/
+	// Spread rate and burn probability parameters (from MEDSPREAD)
+	FireRunStrength = 10	OFF
+	StochasticSpread = 0.75 OFF	// multiply spreadStep by a random number of the range [StochasticSpread , 1]. Note: 1 means no stochasticity
+	rPB = 0.05			OFF
+	pBurnFixThres = 1  	OFF		// minimum threshold above which the burning processes will always activate
+							// it is a number in the range [0,1], 1 means that there is no threshold.
+
+	// Probability of post-fire regeneration by contagion
+	pPostFireContag = 0.4 	OFF  // or 0.5???
+
+	// Radius around a shrub and a rocky location to find out oaks and shrubs, respectively, 
+	// for Afforestation and Encroachment processes
+	AfforestOakRadius = 13	 OFF // in cells:  400 / 30 m = 13.3 cells
+	AfforestPineRadius = 13	 OFF // in cells:  1000 / 30 m = 33.3 cells
+	EncroachRadius = 4	 OFF // in cells --> 120m
+	// Radius around shrubs that have to become fire or oak after fire
+	PineRecoverRadius = 33	OFF  // in cells:  1000 / 30 m = 33.3 cells
+	OakRecoverRadius = 13	OFF
+
+	// Restrictions for some of the Transitions 
+	RewildingTh = 9 		OFF	// Minimum years after any transition to shrubs become oak forest througt natural succession
+	ShrubyTh = 4		OFF	// Minimum years after any transition to rocky vegetation become scrublands
+	ElevationRocky = 543	OFF  	// Minimum elevation where open - rocky vegetation is founded, otherwise it's shrub
+	RateAfforestOak = 2.9 	OFF	// Annual rate in 100% of shrub converting to oak
+	RateAfforestPine = 3.1 	OFF	// Annual rate in 100% of shrub converting to pine
+	RateEncroach = 1.6		OFF	// Annual rate in 100% of rocky veg coverting to shrub
+	SlopeForCrop = 17.5	OFF	 // Maximum slope threshold for crops (quantile 90%)
+	ElevForCrop = 500	OFF		// Minimum elevation for shrub convert to crop
+
+	// Tracking variables (outputs and intermediate variables)
+	SppLCArea[NumLC+1]  = 0 		OFF	// Count area occupied by dynamic spp (more dimensions that required, but...)
+	Shrub2Pine[TimeHorizon+11] = 0		OFF	// Record number of shrub cells that have to become Pine over time because of post-fire regeneration	
+	Shrub2Oak[TimeHorizon+11] = 0		OFF	// Record number of shrub cells that have to become Oak over time because of post-fire regeneration
+
+	// Spatial time series output frequency (in days), negative means no output
+	asciiOutputStepLDY = -1 	OFF 	
+	asciiOutputStepWF = -1 		OFF
+	asciiOutputStepINTER = -1 	OFF
+	asciiOutputStepNF = -1 		OFF
+	asciiOutputStepTPOT = -1 	OFF
+	asciiOutputStepSR = -1 	OFF
+	
+Output Frequency: 365.25  // Rate at which screen is refreshed (no need to change)
+
+
+Output Model Frequency:   
+	// Maps to output in spatial time series (when OutputStep > 0)
+	// Save rasters in Arc Ascii format		
+
+	// *** LANDSCAPE DYANMICS ***
+	LCM Freq:asciiOutputStepLDY Filename: "asc\LCM" Type: Arc Ascii Relative
+	TSChg Freq:asciiOutputStepLDY Filename: "asc\TSChg" Type: Arc Ascii Relative
+	TransType Freq:asciiOutputStepLDY Filename: "asc\TransType" Type: Arc Ascii Relative
+
+	// *** FIRE ***
+	//EffectBurntOrSuppress Freq:asciiOutputStepLDY Filename: "asc\EffectBurntOrSuppress" Type: Arc Ascii Relative
+	ProbIgnition Freq:asciiOutputStepWF Filename: "asc\ProbIgnition" Type: Arc Ascii Relative
+	TimesBurnt Freq:asciiOutputStepWF Filename: "asc\TimesBurnt" Type: Arc Ascii Relative	
+	Ignition Freq:asciiOutputStepWF Filename: "asc\Ignition" Type: Arc Ascii Relative	
+	BurntFireId Freq:asciiOutputStepWF Filename: "asc\BurntFireId" Type: Arc Ascii Relative
+	SprdRate Freq:asciiOutputStepSR Filename: "asc\SprdRate" Type: Arc Ascii Relative
+	SprdSlope Freq:asciiOutputStepSR Filename: "asc\SprdSlope" Type: Arc Ascii Relative
+	SprdSppFlam Freq:asciiOutputStepSR Filename: "asc\SprdSppFlam" Type: Arc Ascii Relative
+	SprdAspc Freq:asciiOutputStepSR Filename: "asc\SprdAspc" Type: Arc Ascii Relative
+
+	// *** TRANSITION POTENTIAL ***
+//	TransPot_PlantEco Freq:asciiOutputStepTPOT Filename: "asc\TransPot_PlantEco " Type: Arc Ascii Relative
+//	TransPot_PlantSmart Freq:asciiOutputStepTPOT Filename: "asc\TransPot_PlantSmart " Type: Arc Ascii Relative
+	TransPot_Agri Freq:asciiOutputStepTPOT Filename: "asc\TransPot_Agri" Type: Arc Ascii Relative
+	TransPot_Rabn Freq:asciiOutputStepTPOT Filename: "asc\TransPot_Rabn" Type: Arc Ascii Relative
+
+	// *** INTERFACE ***
+	Interface Freq:asciiOutputStepINTER Filename: "asc\Interface" Type: Arc Ascii Relative
+/*	NF_Urban Freq:asciiOutputStepNF Filename: "asc\NF_Urban" Type: Arc Ascii Relative
+	NF_Crop Freq:asciiOutputStepNF Filename: "asc\NF_Crop" Type: Arc Ascii Relative
+	NF_Shrub Freq:asciiOutputStepNF Filename: "asc\NF_Shrub" Type: Arc Ascii Relative
+	NF_Pine Freq:asciiOutputStepNF Filename: "asc\NF_Pine" Type: Arc Ascii Relative
+	NF_Oak Freq:asciiOutputStepNF Filename: "asc\NF_Oak" Type: Arc Ascii Relative
+	NF_Rocky Freq:asciiOutputStepNF Filename: "asc\NF_Rocky" Type: Arc Ascii Relative
+	NF_Nat Freq:asciiOutputStepNF Filename: "asc\NF_Nat" Type: Arc Ascii Relative
+	NF_UrbCrp Freq:asciiOutputStepNF Filename: "asc\NF_UrbCrp" Type: Arc Ascii Relative
+	NF_UrbNat Freq:asciiOutputStepNF Filename: "asc\NF_UrbNat" Type: Arc Ascii Relative
+	NF_CrpNat Freq:asciiOutputStepNF Filename: "asc\NF_CrpNat" Type: Arc Ascii Relative
+*/
+
+	

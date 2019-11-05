@@ -1,0 +1,146 @@
+//// Post-fire regeneration REMAINS
+LSEVENT: PostFireRege
+
+DEFINITIONS
+	GLOBAL CONSTANT: DaysPerYr, HaPerCell, CellWidth
+	GLOBAL VARIABLE: TimeStep
+	LAYER: LCM, PrevLCM, TSChg, TransType, Aspect, SlopeDegree, Elevation 
+	GLOBAL VARIABLE: SppLCArea[], pPostFireContag, ElevationRocky
+	GLOBAL CONSTANT: TimeHorizon, FirstBurnableClass, LastBurnableClass
+	GLOBAL CONSTANT: PostFireRege[], Fire
+	GLOBAL CONSTANT: Shrub, Pine, Oak, Rocky, ShrubToPine, ShrubToOak, NumLC		
+	LOCAL: totTrans, sppId
+	LOCAL: pTrans[LastBurnableClass+1],  neighbType[8], nneigh, bycontagion
+	LOCAL: CountRege[NumLC+1,NumLC+1]
+	OUTPUT VARIABLE: AreaFile = SppLandCoverArea.txt
+	OUTPUT VARIABLE: PostFireFile = PostFire.txt
+//	OUTPUT VARIABLE: TestFile = PostFireRege.txt
+ENDDEF
+
+
+INITIALSTATE	
+	// Sum ha for all dynamic land-cover
+	SppLCArea [=] 0 
+	OVER REGION WHOLE MAP 
+	DECISION (0 < LCM ) 
+		SppLCArea[LCM] = SppLCArea[LCM] + HaPerCell    
+	ENDFN
+	OUTPUT(AreaFile)
+		Run
+		Year: 0 
+		LC#1:NumLC: SppLCArea[Index]
+	ENDFN
+
+   INITIALSTATE = 1
+ENDIS
+
+
+RETURNTIME
+	// Event scheduled once at the end of the year (time units are in days, TimeStep is in years)
+	RETURNTIME = IF Time EQ 0 THEN 362 ELSE TimeStep * DaysPerYr
+	// Store previous forest map 
+	PrevLCM = LCM 	
+ENDRT
+
+
+EVENTLOCATION
+	// A dynamic post-fire regeneration only occurs for forest areas: pines and oaks
+	STATIC REGION WHOLE MAP
+	DECISION (Pine <= LCM <= Oak) 
+ENDEL
+
+
+TRANSITIONS
+
+	TRANSITIONS = TRUE 
+
+	//////////////////////////////////////////////////////////
+	// Post-fire regeneration:  Treat post-fire regeneration separate from later changes
+	// Fire.lse only burns, but doesn´t set forest map
+	//////////////////////////////////////////////////////////
+	IF (TSChg EQ 0) AND (TransType EQ Fire) AND (Pine <= PrevLCM <= Oak) 
+
+		// Decide if we are to use a neighbour contagion in post-fire regeneration process
+		nneigh = 0
+		IF UNIFORM(0,1) < pPostFireContag
+			// Identify wether any of the 8 neighbours (1) have same forest class, (2) also hast just burned, and 
+			// (3) have been already assigned a new LCFM class
+			OVER REGION CENTRED(1,1.5)
+			DECISION (PrevLCM  EQ SOURCE PrevLCM) 
+				neighbType[nneigh] = LCM // store neighbour value
+				nneigh = nneigh + 1
+			ENDFN
+		ENDFN
+
+		sppId = 0
+		// Choose a land-cover to which do the transitions if there is no "like" neighbours or we have chosen not to apply contagion
+		IF nneigh == 0	
+			// First set up probability array (for each "to" species)
+			totTrans = 0
+			// Extract row index into post-fire succession table according to pre-fire species
+			OVER INDEX (1, (LastBurnableClass-1)) // iterate over table columns (1 to 6) ???
+				// Look up prob for post-fire species using pre-fire species (row) and post-fire species (column), 	 	       		pTrans[Index] = PostFireRege[PrevLCM, Index] 
+				totTrans = totTrans + pTrans[Index]
+				/*OUTPUT(TestFile)
+					Run
+					Year: FLOOR(Time/365.25) + 1
+					PrevLCM
+					Index
+					p:pTrans[Index]
+				END		*/		
+			ENDFN 
+			// If there isn't any neigbhors "to" what it may change, just remain (even if this never will happen)
+			IF (totTrans EQ 0)
+				LCM = PrevLCM
+			// Otherwise, select a spp according to the restricted post-fire transition distribution
+			ELSE
+				sppId = CLASSIFIED_DIST[pTrans] 	// Pick from prob. distribution for species sequence ids 
+				// Open shrubs (i.e. rocky areas only occur in high elevations)
+				IF ((sppId+1) EQ Rocky) AND (Elevation<ElevationRocky)
+					LCM = Shrub
+				// A percentage of post-fire regeneration of forest species (pines and oaks) are to these same species
+				// gradually over time, knowing that on a certain future 100% is converted to the forest species
+				ELSE IF ((sppId+1) EQ Pine)
+					LCM = ShrubToPine
+				ELSE IF ((sppId+1) EQ Oak)
+					LCM = ShrubToOak
+				ELSE
+				// Otherwise is Shurb or Rocky in high altitudes  
+					LCM = sppId+1    
+				END
+			ENDFN
+			bycontagion = 0
+		// Otherwise use contagion, and pick one of the neighbours
+		ELSE
+			// Pick a number from 0 to n-1
+			x = MIN(FLOOR(UNIFORM(0,nneigh)),nneigh-1)
+			IF(neighbType[x] EQ Pine)
+				LCM = ShrubToPine
+			ELSE IF(neighbType[x] EQ Oak)
+				LCM = ShrubToOak
+			ELSE		
+				LCM = neighbType[x]
+			END
+			bycontagion = 1
+		ENDFN
+
+		// Track the post-fire regeneration pathways from Pine and Oak
+		CountRege[PrevLCM,LCM] = CountRege[PrevLCM,LCM] + HaPerCell		
+
+	ENDFN
+
+ENDTR
+
+
+ENDEVENT
+
+	OUTPUT(PostFireFile )
+	Run
+	Year: FLOOR(Time/365.25) + 1
+	PineRege#1:9: CountRege[3,Index]
+	OakRege#1:9: CountRege[4,Index]
+	ENDFN
+
+	ENDEVENT = TRUE
+ENDEE
+

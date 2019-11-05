@@ -1,0 +1,16 @@
+SELES Scenario
+
+// Point to spatial data
+$gisdata$ = inputlyrs\cell 	
+
+// LOAD SPATIAL INPUT VARIABLES
+initialLCM = $gisdata$\LCM10	  		// Forest Map: coverts and main forest species (no mixes)
+
+/// LOAD SPATIAL INPUT CONSTANTS 
+StudyArea = $gisdata$\StudyArea10
+AdminRegion = $gisdata$\Countries				// Country: PT=1 or GZ=2
+Elevation = $gisdata$\DEM				// Digital Elevation Model
+Aspect = $gisdata$\Aspect				// 0 mean no aspect, otherwise 1-4 (N, E, S, W)
+DensRoad = $gisdata$\DensRoad			// Density of Roads in the UTM grid		(for PROBIGNI)
+SlopeDegree = $gisdata$\SlopeDegree					// Slope is in percentage units	(for NATSUCC)
+UTM =  $gisdata$\UTM1km

@@ -1,0 +1,103 @@
+// Encroachment for REMAINS
+LSEVENT: Encroachment 
+
+DEFINITIONS
+	GLOBAL CONSTANT: DaysPerYr, HaPerCell
+	GLOBAL VARIABLE: TimeStep
+	LAYER: LCM, PrevLCM, TSChg, TransType
+	GLOBAL VARIABLE: ShrubyTh, RateEncroach, EncroachRadius
+	GLOBAL CONSTANT: Shrub, Oak, Pine, Rocky, AfforOak, AfforPine, Encro
+	EVENT VARIABLE: TargetEncroach
+	LOCAL: RockyShrub, AreaEncro
+	LOCAL: nneigh, nshrub
+	OUTPUT VARIABLE: NatSuccFile = Encroach.txt 
+//	OUTPUT VARIABLE: TestFile = TestNatSucc.txt
+ENDDEF
+
+
+INITIALSTATE	
+   INITIALSTATE = 1
+ENDIS
+
+
+RETURNTIME
+	// Event scheduled once at the end of the year (time units are in days, TimeStep is in years)
+	RETURNTIME = IF Time EQ 0 THEN 364.5 ELSE TimeStep * DaysPerYr
+
+	// Count available rocky vegetation that can become shrub (n.cells)
+	RockyShrub = 0
+	OVER REGION WHOLE MAP
+	DECISION (LCM EQ Rocky) AND (TSChg > ShrubyTh)
+		RockyShrub  = RockyShrub + 1
+	ENDFN	
+
+	// According to the annual rates, determine the target for each transition
+	TargetEncroach = ROUND(RockyShrub*RateEncroach/100)	// n.cells
+
+	// To track the area changed
+	AreaEncro = 0
+
+ENDRT
+
+
+EVENTLOCATION
+	STATIC REGION WHOLE MAP
+	DECISION ((LCM EQ Rocky) AND (TSChg > ShrubyTh))
+ENDEL
+
+
+NUMCLUSTERS 
+	NUMCLUSTERS = TargetEncroach*3
+ENDNC
+
+
+PROBINIT
+	PROBINIT = ROUND(UNIFORM(1,100))
+ENDPI
+
+
+TRANSITIONS
+
+	TRANSITIONS = (LCM EQ Rocky) AND (TSChg > ShrubyTh) AND (TargetEncroach>0)
+
+	// Count shrubs in a circular neighborhood 
+	nneigh = 0
+	nshrub = 0
+	OVER REGION CENTRED (1, EncroachRadius)
+	DECISION (LCM >0)
+		nneigh = nneigh + 1
+	END
+	OVER REGION CENTRED (1, EncroachRadius)
+	DECISION (PrevLCM EQ Shrub)	// shrub already stablished, not coming from post-fire regeneration
+		nshrub = nshrub + 1 
+	ENDFN 
+
+	// If succession is happening, then:
+	p = UNIFORM(0.001,1)
+	IF (p <= (nshrub/nneigh)^(1/5))
+		LCM = Shrub
+		TransType = Encro
+		TSChg = 0
+		TargetEncroach = TargetEncroach- 1
+		AreaEncro = AreaEncro + HaPerCell
+	ENDFN
+
+ENDTR
+
+
+ENDEVENT
+
+	// Change from Shrub to Oak/Pine and from Rock to Shrub
+	OUTPUT(NatSuccFile)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		PotentialRocky:	RockyShrub*HaPerCell
+		//RateEncroach
+		TargetEncroach: (RockyShrub*RateEncroach/100)*HaPerCell 
+		AreaEncro 
+	ENDFN
+
+	ENDEVENT=TRUE
+ENDEE
+
+

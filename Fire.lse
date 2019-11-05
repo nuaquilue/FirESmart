@@ -1,0 +1,540 @@
+// Fire event for REMAINS
+// ** Layer of AdminRegion has to cover all LCM>0
+// ** Fire fighting is by by adminsitrative region
+LSEVENT: Fire
+
+DEFINITIONS
+	LAYER: LCM, TSChg, TransType
+	LAYER: Elevation, Aspect, AdminRegion 
+ 	LAYER: ProbIgnition, EffectBurntOrSuppress
+	LAYER: ReceivedFront, Interface, DensRoad
+	/* // SPREAD_FACTORS	
+	LAYER: SprdRate, SprdSlope, SprdSppFlam, SprdAspc // ProbBurn  */
+	/* TIMES_BURNT	*/
+	LAYER: TimesBurnt 
+	/* BURNT_ID 
+	LAYER: BurntFireId */
+	GLOBAL VARIABLE: TimeStep 	
+	GLOBAL VARIABLE: StochasticSpread, rPB, FireRunStrength, pBurnFixThres 
+	GLOBAL VARIABLE: MaxABTarget 	// To truncate Anual Burnt Tareget Area	
+	GLOBAL CONSTANT: HaPerCell, CellWidth, DaysPerYr
+	GLOBAL CONSTANT: TimeHorizon, NumAdmin 
+	GLOBAL CONSTANT: Crop, Shrub, Pine, Oak, Water, Urban, NumLC 
+	// Annual Burnt Area and Fire Size Distributions, Fire Fighting strategy
+	GLOBAL CONSTANT: BA_PT[], BA_GZ[], FS_PT[], FS_GZ[]			// col 0 is bound, col 1 is freq 
+	GLOBAL CONSTANT: maxBA_PT, maxBA_GZ, maxFS_PT,	maxFS_GZ
+	GLOBAL CONSTANT: Fire, FFstrategy[]
+	// Interfaces (for Prob Ignition)
+	GLOBAL CONSTANT: Urb, Crp, Shrb, Frst, Oth, UrbCrp, UrbShrb, UrbFrst, CrpShrb, CrpFrst, ShrbFrst	// From Interface
+	LOCAL: ProbIgniTrunc, IsNat,IsUrbNat, IsCrpNat, z, p
+	// ProbIgni model coefficients
+	GLOBAL CONSTANT: ProbIgniModel[]
+	//Inputs: Fuel and Spp parameters deal with Spread, Weihts
+	GLOBAL CONSTANT: LCFireProneness[], SprdRateWeights[] // fire parameter for relative spread rate, second for absolute probabilty of burning  
+	// Working variables
+	EVENT VARIABLE: TotalExtent, Country, Year 
+	LOCAL: FireId , Area, baCls, sizeCls
+	CLUSTER VARIABLE: FireExtentTarget, FireExtent
+	CLUSTER VARIABLE: aBurntGZ, aBurntPT, aFuelSuppGZ, aLandSuppGZ, aFuelSuppPT, aLandSuppPT, aAgriBurnt, AgriFront
+	CLUSTER VARIABLE: SprdTh, AgriTh, FuelSupp, LandSupp
+	CELL VARIABLE: Slope, SppFlam, Aspc, SR_noAcc, SR, pBurn
+	CELL VARIABLE: spreadStep, burning, neighbor
+	CELL VARIABLE: FuelSuppressed, LandSuppressed 
+	CELL VARIABLE: elevDiff, estFireSlope
+	CELL VARIABLE: isFrontAgri, isSourceAgri
+	//Tracking variables, to report model global results 
+	LOCAL: LCTargetPerFire[NumLC+1], LCBurntPerFire[NumLC+1], LCSuppPerFire[NumLC+1]
+	// used to pull out the distribution so that it can be used in CLASSIFIED_DIST
+	LOCAL: appliedBA_PT[maxBA_PT], appliedBA_GZ[maxBA_GZ] 
+	LOCAL: appliedFS_PT[maxFS_PT], appliedFS_GZ[maxFS_GZ] 
+	//Output files 	
+	OUTPUT VARIABLE: FireFile = PerFire.txt
+	OUTPUT VARIABLE: LCTFireFile = PerFire.LCT.txt
+/*	OUTPUT VARIABLE: TestFireSrpd = TestFireSprd.txt
+	OUTPUT VARIABLE: TestFireRegime = TestFireRegime.txt
+	OUTPUT VARIABLE: TestFireSize = TestFireSize.txt	
+	OUTPUT VARIABLE: TestLayers = TestLayers.txt
+	OUTPUT VARIABLE: TestSrpdParam = TestSprdParam.txt		*/
+ENDDEF
+
+
+INITIALSTATE
+	// Set first first id
+	FireId = 1 
+
+	// Set up applied fire size and annual burn cumulative distributions
+	OVER INDEX(0, maxBA_PT-1)
+		appliedBA_PT[Index] = BA_PT[Index,1]
+	ENDFN
+	OVER INDEX(0, maxBA_GZ-1)
+		appliedBA_GZ[Index] = BA_GZ[Index,1]
+	ENDFN
+	OVER INDEX(0, maxFS_PT-1)
+		appliedFS_PT[Index] = FS_PT[Index,1]
+	ENDFN
+	OVER INDEX(0, maxFS_GZ-1)
+		appliedFS_GZ[Index] = FS_GZ[Index,1]
+	ENDFN
+
+	// To upper trucate dynamic ProbIgni.
+	ProbIgniTrunc = 100  
+
+	/* TIMES_BURNT */
+	OVER REGION WHOLE MAP
+	DECISION (LCM > 0)		
+		TimesBurnt = 0
+	ENDFN	
+
+	INITIALSTATE =  2  // One for Portugal (EventId EQ 1) and another for Galicia (EventId EQ 2)
+ENDIS
+
+
+
+RETURNTIME
+	// First fire event is half way through year, after succession. Subsequent events are 1 time step later
+	RETURNTIME = IF Time EQ 0 THEN 361 ELSE TimeStep * DaysPerYr
+
+	Year = FLOOR(Time/365.25) + 1
+	IF(Year EQ 1)
+		Country = EventId  
+	ELSE
+		Country = IF(EventId  % Year) EQ 0 THEN 2 ELSE 1
+	END
+
+	// Clear track spatial variables (clean them every year)		
+	OVER REGION WHOLE MAP
+	DECISION (LCM > 0) AND (Country EQ 1)	
+		EffectBurntOrSuppress = 0	
+		ReceivedFront = 0
+		/* // SPREAD_FACTORS 
+		SprdRate = 0
+		SprdSlope = 0 
+		SprdSppFlam = 0
+		SprdAspc = 0
+		ProbBurn = 0		*/
+	ENDFN
+
+	// Update dynamic ProbIgnition 
+	OVER REGION WHOLE MAP
+	DECISION (LCM > 0)
+		IF(DensRoad>=0 AND Interface>0 )
+			z = ProbIgniModel[1] + ProbIgniModel[2]*(Interface EQ Urb) + ProbIgniModel[3]*(Interface EQ Crp) + ProbIgniModel[4]*(Interface EQ Shrb) + ProbIgniModel[5]*(Interface EQ UrbCrp) + ProbIgniModel[6]*(Interface EQ UrbShrb) + ProbIgniModel[7]*(Interface EQ UrbFrst) + ProbIgniModel[8]*(Interface EQ CrpShrb) + ProbIgniModel[9]*(Interface EQ CrpFrst) + ProbIgniModel[10]*Elevation + ProbIgniModel[11]*DensRoad 
+			p = ROUND((1/(1+EXP(-1*z)))*100)
+			ProbIgnition = CLAMP(p,0,ProbIgniTrunc)
+		ELSE
+			ProbIgnition = 0
+		ENDFN
+	ENDFN
+		
+	  
+	// Annual Target Area
+	// At start of each fire, select a size according to administrative region
+	baCls =  IF (Country EQ 1)
+				THEN CLASSIFIED_DIST(appliedBA_PT) 	// Pick a class from Portugal area burnt distribution
+				ELSE CLASSIFIED_DIST(appliedBA_GZ)	// Pick a class from Galitzia area burnt distribution
+	// Then pick a random target area from within the class
+	Area = IF baCls EQ 0 THEN 0
+				   ELSE IF (Country EQ 1) THEN ROUND(UNIFORM(BA_PT[baCls -1,0]+1, BA_PT[baCls ,0]))
+	               	   ELSE ROUND(UNIFORM(BA_GZ[baCls -1,0]+1, BA_GZ[baCls ,0])) 
+	// Cange to cells (i.e. divide by HaPerCell) and round so that it is an integer
+	TotalExtent = ROUND(Area/HaPerCell)  
+
+	/*	// Check
+	OUTPUT(TestFireRegime)
+		EventId
+		Year: FLOOR(Time/365.25) + 1
+		Country 
+		HaPerCell
+		CellWidth
+		baCls 
+		Area			// in ha
+		TotalExtent  	// in n.cells
+	ENDFN	*/
+
+ENDRT
+
+
+EVENTLOCATION
+	// Allow ignitions in any burnable cell
+	STATIC REGION WHOLE MAP
+	DECISION  (1<= LCM) AND (LCM NEQ Water) AND (LCM NEQ Urban) 
+ENDEL
+
+
+NUMCLUSTERS 
+	// Draw clusters (fire ignitions) until we burn the total annual extent. The "WHILE <condition>" says 
+	// that we don't know how many clusters to start, but we know when to stop creating clusters.
+	NUMCLUSTERS = WHILE TotalExtent > 0 // Keep placing fires while this condition is true
+ENDNC
+
+
+PROBINIT
+
+/*	//Check
+	OUTPUT(TestLayers)
+		EventId
+		Year: FLOOR(Time/365.25) + 1
+		Country
+		Location		
+		AdminRegion	
+		ProbIgnition
+		Interface
+		LCM
+	ENDFN	*/
+
+	PROBINIT = ProbIgnition * (AdminRegion EQ Country)
+
+	// TARGET AREA				
+	// At the start of each fire, select a size according to country
+	sizeCls =  IF (Country EQ 1)
+				THEN CLASSIFIED_DIST(appliedFS_PT) 		// Pick a class from Portugal fire size distribution
+				ELSE CLASSIFIED_DIST(appliedFS_GZ) 	 	// Pick a class from Galitzia fire size distribution
+	// Then pick a random fire size from within the class (in ha)
+	Area = IF sizeCls EQ 0 THEN 0
+					ELSE IF (Country EQ 1)  THEN ROUND(UNIFORM(FS_PT[sizeCls-1,0]+1, FS_PT[sizeCls,0]))
+     	               	 	ELSE ROUND(UNIFORM(FS_GZ[sizeCls-1,0]+1, FS_GZ[sizeCls,0])) 
+	// Change to cells unit (i.e. divide by HaPerCell) and round so that it is an integer
+	FireExtentTarget = ROUND(Area/HaPerCell)  
+	// Remainder extent to burn (actual). Decremented as fire burns.
+	FireExtent = FireExtentTarget 	
+
+	// FIRE FIGHTING
+	SprdTh = FFstrategy[Country,0]
+	AgriTh = FFstrategy[Country,1]
+	FuelSupp = IF SprdTh > 0 THEN	 TRUE ELSE FALSE
+	LandSupp = IF AgriTh > 0 THEN	 TRUE ELSE FALSE
+	
+	/*	//Check
+	OUTPUT(TestFireSize)
+		EventId
+		Year: FLOOR(Time/365.25) + 1
+		Country
+		Location		
+		AdminRegion	
+		ProbIgnition
+		Interface
+		LCM
+		FireId
+		sizeCls
+		Area	
+		FireExtentTarget
+		SprdTh
+		AgriTh	
+		FuelSupp
+		LandSupp
+	ENDFN	*/
+
+	//Initialize Cluster variables	
+	aBurntGZ = 0
+	aFuelSuppGZ = 0
+	aLandSuppGZ = 0
+	aBurntPT = 0
+	aFuelSuppPT = 0
+	aLandSuppPT = 0
+	aAgriBurnt = 0
+	AgriFront = 0
+
+	//Initialize Cell variables	
+	spreadStep = 1
+	burning = TRUE 	// initially the fire is burning
+	FuelSuppressed = FALSE
+	LandSuppressed = FALSE
+	isFrontAgri = FALSE
+	isSourceAgri = FALSE
+	neighbor = FALSE
+
+	// Spread rate associated variables	
+	Slope=0 
+	SppFlam=0 
+	Aspc=0 
+	SR_noAcc=0 
+	SR=0 
+	pBurn=0
+
+	//Initialize Report variables	
+	LCTargetPerFire[=] 0
+	LCBurntPerFire[=] 0
+	LCSuppPerFire[=] 0
+
+	/* BURNT_ID 
+	BurntFireId = FireId */
+	
+ENDPI
+
+
+
+TRANSITIONS
+
+	// After PROBINIT, this is the next Property taking place
+	// Spread rate and Spread step are assessed for the ignition point the first time
+	// Local variables preserve their value initialized in PROBINIT
+
+	// Calculate rate of spread here so that it can also affect pBurn
+	// Be careful that these scale with resolution.... (e.g. elevDiff will likely increase with larger cells, so estimate slope)
+	// Spread time is the relative speed of the fire. A smaller spread time means faster in that direction.
+	// Hence, uphill (postive elevDiff) has a small spread time, while downhill has a larger spread time.
+
+	IF(neighbor) 
+		// Scaling Factors between 0 to 1 
+		Slope = CLAMP(estFireSlope,-0.5,0.5)+0.5  	
+		SppFlam = LCFireProneness[LCM]
+		Aspc = 	IF Aspect EQ 1 THEN 0.1	   	// North = 0.1
+				ELSE IF Aspect EQ 3 THEN 0.9 	// South = 0.9
+				ELSE IF Aspect EQ 4 THEN 0.4 	// West = 0.4
+				ELSE 0.3				// East = 0.3
+	 	// Spread Rate (linear model without interactions and without square relations)	 
+		SR_noAcc = SprdRateWeights[1]*Slope+SprdRateWeights[2]*SppFlam + SprdRateWeights[3]*Aspc
+		// Low fire spread rate for low-fuel land-covers
+		IF((LCM EQ Shrub) AND (TSChg <=4)) OR ((Pine <= LCM <= Oak) AND (TSChg <=8))
+			SR_noAcc = 0.2
+		END
+		// SR_noAcc multiplied by a number accelerating fire fronts
+		SR=SR_noAcc*FireRunStrength
+
+		// spreadStep must depend on SpreadRate (never on ProbBurn) and it must be > 0
+		// if spreadStep = 0 we force Spreading to occur at the same (exact) moment the source cell has to burn
+		// if spreadStep < 0 then several fires spread simultaneously, when we want a clustering spreading 
+		// spreadStep is determinant in fire propagation
+		// the formulation EXP(-SR) transforms SR in a variable between 0 and 1, a
+		// and it decresases exponentially as SR increases
+		spreadStep = EXP(-1*SR) * UNIFORM(StochasticSpread, 1)
+
+		// Burn the cell? 
+		pBurn = (1-EXP(-1*(SR_noAcc)))^rPB	
+		burning = IF (pBurn >= 1) THEN TRUE 
+				ELSE IF pBurn <= 0 THEN FALSE
+				ELSE UNIFORM(0,pBurnFixThres) < pBurn
+
+		// Suppress the fire on that cell ?		
+		IF (FuelSuppressed OR LandSuppressed )    // suppressed
+			burning = FALSE
+		ELSE
+			IF (FuelSupp AND (100*SR_noAcc <= SprdTh)) 
+			FuelSuppressed = TRUE	
+			burning = FALSE
+			ELSE IF (LandSupp AND (AgriFront >= AgriTh) AND isSourceAgri)  // isFrontAgri
+			LandSuppressed = TRUE	
+			burning = FALSE
+			ENDFN
+		ENDFN
+
+		/* //	SPREAD_FACTORS	
+		SprdRate = ROUND(SR_noAcc*100)
+		SprdSlope = ROUND(Slope*100)
+		SprdSppFlam = ROUND(SppFlam*100)
+		SprdAspc = ROUND(Aspc*100)
+		// ProbBurn = ROUND(pBurn*100)	*/
+
+/*	ELSE
+		// Check
+		wW=SprdRateWeights[1, FireSprdType] 
+		wS=SprdRateWeights[2, FireSprdType]
+		wF=SprdRateWeights[3, FireSprdType]
+		wSpp=SprdRateWeights[4, FireSprdType]
+		wA=SprdRateWeights[5, FireSprdType]
+		OUTPUT(TestSrpdParam)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		FireId
+		Location
+		FireSprdType
+		wW
+		wS
+		wF
+		wSpp
+		wA
+		END	*/
+	
+	ENDFN  // (neighbor)
+
+	// Keep invoking fire spreading only if there is still extent to be burned (for fire and overall)
+	// Even if the cell is marked to not burnt (burning = FALSE), 
+	// fire spreading is still allowed from it 
+	// However, if the cell has already burnt (: BrntOrSuppress NEQ 0) nothing else has to happend
+	continue = (EffectBurntOrSuppress EQ 0) AND (FireExtent > 0) AND (TotalExtent > 0)  
+
+	/*	// Check
+	OUTPUT(TestFireSrpd)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		FireId
+		Location
+		SR_noAcc
+		pBurn
+		burning
+		Slope
+		SppFlam
+		Aspc
+	END	*/
+	
+	TRANSITIONS = continue
+	
+ENDTR
+
+
+SPREADLOCATION
+
+	// Spreading cells spread to the 8 neighbours only if 
+	// these are burnable and haven't already burned this time step
+	// However, if a faster front has already pass through the source cell 
+	// we don't allow reignition, so it won't spread to anywhere!
+
+	// Cells between 1 and 1.5 units away from source cell means up/down/left/right + diagonals
+	minDist = 1  	
+	maxDist = 1.5 
+
+	// Allowed region for spreading: spread to all unburnt neighbours
+	REGION CENTRED(minDist, maxDist)
+	DECISION IF (EffectBurntOrSuppress EQ 0)
+             THEN (0 < LCM ) AND (LCM NEQ Water) AND (LCM NEQ Urban) AND (EffectBurntOrSuppress EQ 0) 
+             ELSE FALSE
+
+ENDSL
+
+
+SPREADPROB
+
+	// The probability of spreading to the pre-selected neighbors (done in SPREADLOC)
+	// depends on the source cell. If the fire front has already cross that cell, no
+	// other spreading processes are possible, otherwise, all the cells have the same
+	// probability of receive spreading 
+	SPREADPROB = (1-(SOURCE ReceivedFront)) 
+
+	// Mark that cell is a neighbor of someone else
+	neighbor = TRUE
+
+	// Diff in Elevation
+	elevDiff = Elevation - SOURCE Elevation 
+	estFireSlope = elevDiff / (CellWidth*DISTANCE(SOURCE Location, Location)) 
+
+	// Mark an agriculture spreading cell only if the source cell is agriculture
+	isFrontAgri = (LCM EQ Crop) * (SOURCE LCM EQ Crop)
+	isSourceAgri = (SOURCE LCM EQ Crop)
+
+	// Spreading cells adopt suppressing from the souce cell
+	FuelSuppressed  = SOURCE FuelSuppressed 
+	LandSuppressed = SOURCE LandSuppressed 
+
+
+ENDSP
+
+
+SPREADTIME
+
+	// Spread time is the time step for spread (spread rate is 1/(spread time))
+	// Specify sequential spreading (otherwise fires spread simultaneously):
+	// Negative spread time will cause a cluster (fire) to spread completely before starting another 
+
+	// Only cells non burnt will be able of spread
+	SPREADTIME = 	IF (EffectBurntOrSuppress EQ 0) THEN -1 * spreadStep 
+					ELSE -1000000
+
+	// Consequence of SpreadTime happens after spreading from that cell to its neighbours
+	IF (ReceivedFront EQ 0) AND (FireExtent > 0) AND (TotalExtent > 0) AND (0 < LCM ) AND (LCM NEQ Water) AND (LCM NEQ Urban)
+
+		// Burn the cell
+		IF burning 
+	 		// Update spatial variables
+			TSChg = 0
+			TransType = Fire
+			EffectBurntOrSuppress = 1 	// 1 in this layer means "effectively burned" 	
+			TimesBurnt = TimesBurnt + 1
+			/* Identify the ignition cell in the tracking layers of burning
+			IF !neighbor
+				EffectBurntOrSuppress = 1
+			END*/
+			// Keep track of how much and what have burnt
+			IF Country EQ 1
+				aBurntPT = aBurntPT + HaPerCell
+			ELSE
+				aBurntGZ = aBurntGZ + HaPerCell
+			END
+			aAgriBurnt = aAgriBurnt + HaPerCell * (LCM EQ Crop)	
+			AgriFront = AgriFront + isFrontAgri
+			// Per land-cover type
+			LCTargetPerFire[LCM] = LCTargetPerFire[LCM] + HaPerCell	
+			LCBurntPerFire[LCM] = LCBurntPerFire[LCM] + HaPerCell			
+
+		// Or suppress it
+		ELSE IF FuelSuppressed 	
+			EffectBurntOrSuppress = 2 	// 2 in this layer means "suppressed" by fuel-based strategy
+			IF Country EQ 1
+				aFuelSuppPT = aFuelSuppPT + HaPerCell
+			ELSE
+				aFuelSuppGZ = aFuelSuppGZ + HaPerCell
+			END
+			LCSuppPerFire[LCM] = LCSuppPerFire[LCM] + HaPerCell	
+		ELSE IF LandSuppressed 	
+			EffectBurntOrSuppress = 3 	// 3 in this layer means "suppressed" by landscape-based strategy
+			IF Country EQ 1
+				aLandSuppPT = aLandSuppPT + HaPerCell
+			ELSE
+				aLandSuppGZ = aLandSuppGZ + HaPerCell
+			END
+			LCSuppPerFire[LCM] = LCSuppPerFire[LCM] + HaPerCell	
+		END
+
+		// Decrement Fire and Total extent, no matter if burning or suppressed, 
+		// but at least one action is required (so, if not burning, do not decrement target 
+		// Count only cells if they are burnable classes: forest, shrub, agriculture and grass
+		IF (burning OR FuelSuppressed OR LandSuppressed)
+			FireExtent = FireExtent - 1 
+			TotalExtent = TotalExtent - 1
+			/* BURNT_ID 
+			BurntFireId = FireId */
+		ENDFN
+
+		// Track Front has passe
+		ReceivedFront = 1	 
+		
+	ENDFN
+ENDST
+
+
+ENDCLUSTER	// After the last active front cell goes out, EndCluster will be invoked
+
+	// Only output if at least 1 cell was burnt or suppressed
+	IF ((aBurntGZ>0) OR (aFuelSuppGZ>0) OR (aLandSuppGZ>0) OR (aBurntPT>0) OR (aFuelSuppPT>0) OR (aLandSuppPT>0)) 
+		
+		area = aBurntGZ + aFuelSuppGZ + aLandSuppGZ + aBurntPT + aFuelSuppPT + aLandSuppPT
+
+		//1. Report target, burnt, suppressed ... areas (in ha)
+		OUTPUT(FireFile)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		Country
+		Fire: FireId
+		aTarget:FireExtentTarget*HaPerCell
+		aBurntPT
+		aBurntGZ
+	   	aActSuppPT: aFuelSuppPT
+	   	aActSuppGZ: aFuelSuppGZ
+		aLandSuppPT
+		aLandSuppGZ
+		RemExtent: FireExtent*HaPerCell
+		ENDFN
+
+		//2. Report target, burnt, and suppressed area for burnable land-use/land-cover (in ha)
+		OUTPUT(LCTFireFile)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		Country
+		Fire: FireId	
+		Target_LC#1:NumLC: LCTargetPerFire[Index]
+		Burnt_LC#1:NumLC: LCBurntPerFire[Index]
+		Supp_LC#1:NumLC:  LCSuppPerFire[Index]
+		ENDFN
+
+	ENDFN
+
+
+	// Increment to next fire id
+	FireId += 1 
+
+	// At present, this must be TRUE (to allow the cluster to go out)
+	ENDCLUSTER = TRUE 
+
+ENDEC
+
+
+

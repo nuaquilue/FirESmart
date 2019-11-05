@@ -1,0 +1,138 @@
+LSEVENT: ReportPtchLChg
+
+DEFINITIONS
+	LAYER: TransType, Visit, LCM, AdminRegion, TSChg
+	GLOBAL CONSTANT: HaPerCell, CellWidth, DaysPerYr, NumTrans 
+	GLOBAL CONSTANT: MarketPlant, SmartPlant, Agri, Rabn
+	GLOBAL VARIABLE: TimeStepLUChg 
+	GLOBAL VARIABLE: remDemand[], trgtDemand[]
+	LOCAL: pId, Dmnd
+	EVENT VARIABLE: isPatchEvent, LCTransition
+	CLUSTER VARIABLE: numActiveCells, PatchSize, PatchCoreSize, PatchPerim, PatchRegion 
+	CLUSTER VARIABLE: rowTotal, colTotal
+	CELL VARIABLE: similarNeighb, numSimilarNeighbours,	numDifferentNeighbours
+ 	OUTPUT VARIABLE: PtchMetricsFile = PatchMetrics.txt
+// 	OUTPUT VARIABLE: TestReportFile = TestReport.txt
+ENDDEF
+
+INITIALSTATE
+   	pId = 0
+	/* Three types of instances: the first NumPType instances identify and computes first order stats for patches */
+   	/*  (a separate instance is used per type so that the list is ordered by type) */
+   	/* The second identifies  and computes first order stats for core areas */
+   	/* The third computes second order stats and then summarizes and outputs */
+   	INITIALSTATE = 4
+
+	SWITCH EventId
+	CLASS 1:		// Market plantation
+		LCTransition = MarketPlant
+	CLASS 2:		// Fire-smart plantation
+		LCTransition = SmartPlant
+	CLASS 3:		// Agriculture converstion
+		LCTransition = Agri
+	CLASS 4:		// Rural abandonment
+		LCTransition = Rabn
+	END
+ENDIS
+
+
+RETURNTIME 
+	RETURNTIME = IF Time EQ 0 THEN 360 ELSE TimeStepLUChg * DaysPerYr 
+	Dmnd =  trgtDemand[LCTransition] - remDemand[LCTransition]
+	Dmnd = Dmnd / HaPerCell  // in pixels
+	OVER REGION WHOLE MAP
+	DECISION LCM > 0
+		Visit = 0 
+	ENDFN
+	/* // Check
+	OUTPUT(TestReportFile)
+		Run
+		Year: FLOOR(Time/DaysPerYr) + 1
+		EventId	
+		LCTransition
+		trgt: trgtDemand[LCTransition] 
+		rem: remDemand[LCTransition]
+		Dmnd
+	END  */
+ENDRT
+
+NUMCLUSTERS 
+	// Start 1 cluster for each potential change
+	NUMCLUSTERS = Dmnd   
+ENDNC
+
+
+PROBINIT
+	PROBINIT = (TransType EQ LCTransition) AND (Visit EQ 0) AND (TSChg EQ 0)
+	// Initialize
+	numActiveCells = 0
+	PatchSize = 0
+	PatchCoreSize = 0
+	PatchPerim = 0
+	rowTotal = 0
+	colTotal = 0
+	PatchRegion = AdminRegion
+	pId = pId + (Visit EQ 0)
+	
+ENDPI
+
+
+TRANSITIONS
+	TRANSITIONS = (Visit EQ 0) AND (TSChg EQ 0)
+
+	// Area
+	PatchSize = PatchSize + HaPerCell 
+
+	// Perimeter
+	numSimilarNeighbours = 0
+	numDifferentNeighbours = 0
+	OVER REGION CENTRED(1, 1)
+	DECISION (0 <= TransType <= NumTrans) 
+		similarNeighb = (TransType EQ LCTransition)
+		numSimilarNeighbours = numSimilarNeighbours + similarNeighb
+		numDifferentNeighbours = numDifferentNeighbours + (similarNeighb EQ FALSE)
+	ENDFN
+	PatchPerim = PatchPerim + (4 - numSimilarNeighbours)*CellWidth
+
+	// Core area
+	OVER REGION CENTRED(1.1, 1.5, EUCLIDEAN)
+	DECISION (0 <= TransType <= NumTrans)
+		similarNeighb = (TransType EQ LCTransition)
+		numSimilarNeighbours = numSimilarNeighbours + similarNeighb 
+		numDifferentNeighbours = numDifferentNeighbours + (similarNeighb EQ FALSE)
+	ENDFN
+	PatchCoreSize = PatchCoreSize + (numDifferentNeighbours EQ 0)*HaPerCell 
+	// Update tracking
+	Visit = 1 
+	numActiveCells = numActiveCells + 1
+	rowTotal = rowTotal + FLOOR(Location / NUMCOLS)
+	colTotal = colTotal + (Location % NUMCOLS)
+	Dmnd = Dmnd - 1 
+ENDTR
+
+
+SPREADLOCATION
+	REGION CENTRED(1, 1.5, EUCLIDEAN)
+	DECISION 	(TransType EQ LCTransition) AND (Visit EQ 0) AND (TSChg EQ 0)
+ENDSL
+
+
+SPREADTIMESTEP
+	SPREADTIMESTEP = -2
+	numActiveCells = numActiveCells - 1
+
+   // If numActiveCells becomes 0, then this patch is done
+   IF (numActiveCells EQ 0)
+	OUTPUT(PtchMetricsFile)
+			Run
+			Year: FLOOR(Time/DaysPerYr) + 1
+			Id: pId 
+			LCT: LCTransition 
+			Region: PatchRegion
+			Area: PatchSize
+	      	CoreArea: PatchCoreSize
+			Perim: PatchPerim
+		ENDFN
+
+   ENDFN
+ENDST
