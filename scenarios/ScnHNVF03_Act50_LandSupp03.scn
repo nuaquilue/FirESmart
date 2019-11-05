@@ -1,0 +1,44 @@
+SELES Scenario
+
+// Scenario's name, n.runs, period
+$scn$ = ScnHNVF03_Act50_LandSupp03
+$runs$ = 20
+$period$ = 39
+
+// Load default spatial layers 
+Scenario: inputlyrs.scn
+
+// Demand
+$Demand$ = "Demand1Y_HNVF_2D"
+// Fire fighting strategy
+$FFstrategy$ = "FF_ACT50_LAND03"
+
+// Load model
+Model Dimensions: StudyArea
+REMAINS.sel
+Minimize All
+Tile
+
+// Land-cover changes annually scheduled 
+TimeStepLUChg = 1	
+// Agriculture Conversion  
+TransPotOpt_Agri = 1
+LigniAgri = 20
+LsprdAgri = 10
+KAgri = 0.3
+
+// Spatial Outputs
+asciiOutputStepLDY = -1*DaysPerYr
+asciiOutputStepINTER  = -1*DaysPerYr
+asciiOutputStepTPOT = -1*DaysPerYr
+asciiOutputStepNF = -1*DaysPerYr
+
+
+// Output folders
+cwd outputs\$scn$\asc
+cwd ..\
+
+// Play
+SimStart $period$*DaysPerYr $runs$
+Close all
+

@@ -1,0 +1,45 @@
+SELES Scenario
+// Scenario's name, n.runs, period, resolution and p.fragmentation
+$exp$ = CalibABA_1.5_Act40_Land01
+$scn$ = Scn$exp$
+$runs$ = 20
+$period$ = 23
+// Load default spatial layers 
+Scenario: inputlyrs.scn
+// Initial map at 1987
+initialLCM = $gisdata$\LCM87
+// LCT Demand
+$Demand$ = "Demand1Y_BAU"
+// Annual Burnt Area distributions
+$AnnualBurntAreaDist_PT$ = "ABAdiscret_1.5_PT"
+$AnnualBurntAreaDist_GZ$ = "ABAdiscret_1.5_GZ"
+// Fire fighting strategy
+$FFstrategy$ = "FF_ACT40both_LAND01"
+// Load model
+Model Dimensions: StudyArea
+REMAINS.sel
+Minimize All
+Tile
+// Land-cover changes annually scheduled 
+TimeStepLUChg = 1
+// Agriculture Conversion  
+TransPotOpt_Agri = 0
+KAgri = 0
+LigniAgri = 0
+LsprdAgri = 0
+// Rural abandonment 
+TransPotOpt_Rabn = 1
+KRabn = 0.2
+LigniRabn = 0.05
+LsprdRabn = 20
+// Spatial Outputs
+asciiOutputStepLDY = -1*DaysPerYr
+asciiOutputStepINTER  = -1*DaysPerYr
+asciiOutputStepTPOT = -1*DaysPerYr
+asciiOutputStepNF = -1*DaysPerYr
+// Output folders
+cwd outputs\$scn$
+// Play
+SimStart $period$*DaysPerYr $runs$
+Close all
+

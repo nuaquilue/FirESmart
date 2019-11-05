@@ -1,0 +1,49 @@
+SELES Scenario
+
+// Scenario's name, n.runs, period
+$scn$ = ScnSMART01_Act50
+$runs$ = 20
+$period$ = 39
+
+// Load default spatial layers 
+Scenario: inputlyrs.scn
+
+// Demand
+$Demand$ = "Demand1Y_BAU"
+$FFstrategy$ = "FF_ACT50"
+
+// Load model
+Model Dimensions: StudyArea
+REMAINS.sel
+Minimize All
+Tile
+
+// Land-cover changes annually scheduled 
+TimeStepLUChg = 1	
+// Fire-smart plantation 
+ActiveSmartPlant = 1
+RateSmartPlant = 1
+LigniSmartPlant = 0.25
+LsprdSmartPlant = 10
+KSmartPlant = 0.3
+// Rural abandonment  
+TransPotOpt_Rabn = 1
+LigniRabn = 0.05
+LsprdRabn = 20
+KRabn = 0.2
+
+// Spatial Outputs
+asciiOutputStepLDY = -1*DaysPerYr
+asciiOutputStepINTER  = -1*DaysPerYr
+asciiOutputStepTPOT = -1*DaysPerYr
+asciiOutputStepNF = -1*DaysPerYr
+
+
+// Output folders
+cwd outputs\$scn$\asc
+cwd ..\
+
+// Play
+SimStart $period$*DaysPerYr $runs$
+Close all
+
