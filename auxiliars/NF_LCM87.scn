@@ -1,0 +1,21 @@
+SELES Scenario // To generate 3 NeighFac layers from LCM87
+// Basic parameters
+$scn$ = NF_LCM87
+// Point to spatial data
+$gisdata$ = ..\inputlyrs\cell
+// Load constant spatial input layers
+LCM = $gisdata$\LCM87
+StudyArea = $gisdata$\StudyArea
+// Load main model (configure state space and load landscape events)
+Model Dimensions: StudyArea
+NF_LCM.sel 	
+Minimize All
+Tile
+OutputNeigh = 1
+Radius = 600 // in m
+// Change to output folder and create two new folders: asc & img
+cwd outputs\$scn$\asc
+cwd ..\
+// Let's start
+SimStart 1 1 
+

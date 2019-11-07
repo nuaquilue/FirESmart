@@ -1,0 +1,21 @@
+SELES Scenario // To translate de forest land-cover map to a 4-categories LULC map // Basic parameters
+$scn$ = LULCdummy
+// Point to spatial data
+$gisdata$ = ..\inputlyrs\cell
+// Load constant spatial input layers
+LCFM = $gisdata$\LCFMdummy
+StudyArea = $gisdata$\StudyArea
+// Load main model (configure state space and load landscape events)
+Model Dimensions: StudyArea
+LULCmap.sel 	
+Minimize All
+Tile
+OutputLULC = 1
+// Create new subfolders and change to output folder 
+cwd outputs\$scn$\asc
+cwd ..\cell
+cwd ..\cellhd
+cwd ..\
+// Let's start
+SimStart 1 1 
+

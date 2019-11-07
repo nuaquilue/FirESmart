@@ -1,0 +1,40 @@
+Seles Model  
+Time Units: Year Year 1 1 // 1 time unit means 1 year
+
+Landscape Events:
+	LCFMtoLULC.lse DEBUG
+	
+Spatial Constants:
+	StudyArea
+	LCFM
+
+Global Constants: 
+//	CellWidth = 30 // CELL WIDTH(LULC) // Why CELL WIDTH doesn't work ok????!!!!
+	DaysPerYr = 365.25
+//	NumCateg = 8
+	Urbn = 8
+	Crop = 6
+	Shrb = 4
+	ShRk = 5
+	Cnif = 2
+	Cadu = 1
+	Wter = 3
+	Rock = 7
+
+Spatial Variables:
+	LULC[4] <- 0
+
+Global Variables:
+	// Time parameters (in years)
+	TimeStep = 1 	OFF
+ 	
+	// For spatial outputs
+	OutputLULC = -1 OFF
+
+
+Output Model Frequency:
+	// Maps to output in spatial time series (when OutputStep > 0).
+	// "Relative" means the output folder is relative to where the simulation runs, not to where the model files are
+	LULC Freq: OutputLULC Filename: "cell\LULC" Type: Grass Compressed Relative	
+
+

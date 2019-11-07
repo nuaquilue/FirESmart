@@ -1,0 +1,53 @@
+/*********
+	Translate a Forest map of 8 categories to a coarser legend map
+*********/
+
+LSEVENT: ToLULCmap
+
+DEFINITIONS
+	GLOBAL VARIABLE: TimeStep
+	LAYER: LULC, LCFM
+	GLOBAL CONSTANT: DaysPerYr 
+	GLOBAL CONSTANT: Urbn, Crop, Shrb, ShRk, Cnif, Cadu, Wter, Rock
+ENDDEF
+
+
+INITIALSTATE 
+	// By the time, only one instance to compute LULCmap
+	INITIALSTATE = 1
+ENDIS 
+
+
+EVENTLOCATION
+	STATIC REGION WHOLE MAP
+	DECISION (LCFM > 0) 
+ENDEL
+
+
+RETURNTIME
+	RETURNTIME = IF Time EQ 0 THEN 1 ELSE TimeStep * DaysPerYr 
+
+
+	// Urban
+	OVER REGION WHOLE MAP
+	DECISION (LCFM EQ Urbn)
+		LULC = 1
+	ENDFN
+	// Crop
+	OVER REGION WHOLE MAP
+	DECISION (LCFM EQ Crop)
+		LULC = 2
+	ENDFN
+	// Natural
+	OVER REGION WHOLE MAP
+	DECISION ((LCFM EQ Shrb) OR (LCFM EQ ShRk) OR (LCFM EQ Cnif) OR (LCFM EQ Cadu))
+		LULC = 3
+	ENDFN
+	// Others
+	OVER REGION WHOLE MAP
+	DECISION ((LCFM EQ Wter) OR (LCFM EQ Rock))
+		LULC = 4
+	ENDFN
+
+ENDRT
+

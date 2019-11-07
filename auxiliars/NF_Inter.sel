@@ -1,0 +1,46 @@
+Seles Model  
+Time Units: Year Year 1 1 // 1 time unit means 1 year
+
+Landscape Events:
+	NeighFactorInter.lse DEBUG
+	
+Spatial Constants:
+	StudyArea
+	Interface
+
+Global Constants: 
+	CellWidth = 30 // CELL WIDTH(LULC) // m					// Why CELL WIDTH doesn't work ok????!!!!
+	DaysPerYr = 365.25
+	NumInter = 7
+	Nat = 3
+	UrbCrp = 5
+	UrbNat = 6
+	CrpNat = 7
+
+Spatial Variables:
+	// Neighboorhoud factor (when res = 30 meters)
+	NF_Nat[60000] <- 0
+	NF_UrbCrp[60000] <- 0
+	NF_UrbNat[60000] <- 0
+	NF_CrpNat[60000] <- 0
+
+Global Variables:
+	// Time parameters (in years)
+	TimeStep = 1 	OFF
+ 	
+	// Parameters
+	Radius = 0 // in m
+	SquareNeigh = TRUE
+
+	// For spatial outputs
+	OutputNeigh = -1 OFF
+
+
+Output Model Frequency:
+	// Maps to output in spatial time series (when OutputStep > 0).
+	// "Relative" means the output folder is relative to where the simulation runs, not to where the model files are
+	NF_Nat Freq:OutputNeigh Filename: "asc\NF_Nat" Type: arc ascii Relative	 //Grass Compressed Relative	
+	NF_UrbNat Freq:OutputNeigh Filename: "asc\NF_UrbNat" Type: arc ascii Relative	 //Grass Compressed Relative	
+	NF_UrbCrp Freq:OutputNeigh Filename: "asc\NF_UrbCrp" Type: arc ascii Relative	 //Grass Compressed Relative	
+	NF_CrpNat Freq:OutputNeigh Filename: "asc\NF_CrpNat" Type: arc ascii Relative	 //Grass Compressed Relative	
+

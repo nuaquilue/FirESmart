@@ -1,0 +1,63 @@
+Seles Model  
+Time Units: Year Year 1 1 // 1 time unit means 1 year
+
+Landscape Events:
+	Interfaces11.lse DEBUG
+	
+
+Spatial Constants:
+	LCM
+	UTM
+	StudyArea
+
+Global Constants: 
+	CellWidth = 30 // CELL WIDTH(LULC) // Why CELL WIDTH doesn't work ok????!!!!
+	DaysPerYr = 365.25
+// 	Categories from the LCM
+	Crop = 1
+	Shrub = 2
+	Pine = 3
+	Oak = 4
+	RockyVeg = 5
+	Water = 6
+	Urban = 7
+	NumLC=7
+// 	Categories for the Interfaces layer
+	Urb = 1
+	Crp = 2 
+	Shrb = 3
+	Frst = 4
+	Oth = 5
+	UrbCrp = 6
+	UrbShrb = 7
+	UrbFrst = 8
+	CrpShrb = 9	
+	CrpFrst = 10
+	ShrbFrst = 11
+	// Auxiliars
+	Tot = 12
+	IsMax = 13
+	MinUTM = MIN(UTM)
+	MaxUTM = MAX(UTM)
+
+
+Spatial Variables:
+	Interface[Tot] <- 0
+
+
+Global Variables:
+	// Time parameters (in years)
+	TimeStep = 1 	OFF
+
+	// For spatial outputs
+	OutputInterface = -1 OFF
+
+
+Output Model Frequency:
+	// Maps to output in spatial time series (when OutputStep > 0).
+	// "Relative" means the output folder is relative to where the simulation runs, not to where the model files are
+//	Interface Freq: OutputInterface Filename: "cell\Interface" Type: Grass Compressed Relative	
+	Interface Freq: OutputInterface Filename: "asc\Interface" Type: arc ascii Relative	
+
+
+

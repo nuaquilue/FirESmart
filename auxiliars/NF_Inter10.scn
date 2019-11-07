@@ -1,0 +1,22 @@
+SELES Scenario // To generate 3 NeighFac layers from Interface10
+// Basic parameters
+$scn$ = NF_Inter10_Rad3000
+// Point to spatial data
+$gisdata$ = ..\inputlyrs\cell
+// Load constant spatial input layers
+Interface = $gisdata$\Interface10_1km
+StudyArea = $gisdata$\StudyArea10
+// Load main model (configure state space and load landscape events)
+Model Dimensions: StudyArea
+NF_Inter.sel 	
+Minimize All
+Tile
+OutputNeigh = 1
+Radius = 3000 // in m
+SquareNeigh = TRUE
+// Change to output folder and create two new folders: asc & img
+cwd outputs\$scn$\asc
+cwd ..\
+// Let's start
+SimStart 1 1 
+

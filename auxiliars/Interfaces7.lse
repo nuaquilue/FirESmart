@@ -1,0 +1,205 @@
+// Compute land interfaces layers, that accounts for the heterogeneous composition of the landscape
+// GET SURE THAT UTM COVERS ALL LULC LAYER
+LSEVENT: Interfaces
+
+DEFINITIONS
+	GLOBAL CONSTANT: DaysPerYr
+	GLOBAL VARIABLE: TimeStep, TimeStepLUChg  // Time units are in days, TimeStep is in years
+	LAYER: LCM, UTM, Interface, StudyArea 
+	GLOBAL CONSTANT: Urban, Crop, Shrub, Pine, Oak, Rocky, Water, NumLC
+	GLOBAL CONSTANT: Urb, Crp, Nat, Oth, UrbCrp, UrbNat, CrpNat, Tot, IsMax, MaxUTM 
+	GLOBAL VARIABLE: CoverPctgUTM[], CoverUTM[]
+	LOCAL: ClassOne, ClassTwo, ClassThree
+	LOCAL: SizeLCM, SizeInterface, CountLC[NumLC+1], CountInterface[Tot]
+/*	OUTPUT VARIABLE: CoverPctgFile = CoverPctg.txt
+	OUTPUT VARIABLE: InterfaceFile = LandInterfaces.txt 
+	OUTPUT VARIABLE: TestInterface = TestInterface.txt */
+ENDDEF
+
+
+INITIALSTATE
+	INITIALSTATE =  1
+ENDIS
+
+
+RETURNTIME
+	RETURNTIME = IF Time EQ 0 THEN 1 ELSE TimeStep*DaysPerYr  //TimeStepLUChg  
+
+	// Clean data from previous year
+	CoverPctgUTM[=] 0
+	CoverUTM[=] 0
+	ClassOne = 0
+	ClassTwo  = 0
+ 	ClassThree = 0
+
+	// Sum pixels (not ha) for each LULC
+	OVER REGION WHOLE MAP 
+	DECISION (UTM > 0) 
+		CoverPctgUTM[UTM,5] = CoverPctgUTM[UTM,5] + 1 	
+		// TO USE WITH THE FUTURE 8-CATEGORIES LAND COVER FOREST MAP
+		CoverPctgUTM[UTM,Urb] = CoverPctgUTM[UTM,Urb] + (LCM EQ Urban)		// Urban
+		CoverPctgUTM[UTM,Crp] = CoverPctgUTM[UTM,Crp] + (LCM EQ Crop)		// Agriculture land
+		CoverPctgUTM[UTM,Nat] = CoverPctgUTM[UTM,Nat] + (Shrub <= LCM <= Rocky)	// Shrub, Pine, Oak, Rocky
+		CoverPctgUTM[UTM,Oth] = CoverPctgUTM[UTM,Oth] + (LCM EQ Water) // Others
+
+	ENDFN
+
+	// Transform to percentages according the area occupied in each UTM grid
+	OVER INDEX(1,MaxUTM)	
+		CoverPctgUTM[Index,Urb] = 100 * (CoverPctgUTM[Index,Urb] / CoverPctgUTM[Index,5])
+		CoverPctgUTM[Index,Crp] = 100 * (CoverPctgUTM[Index,Crp] / CoverPctgUTM[Index,5])
+		CoverPctgUTM[Index,Nat] = 100 * (CoverPctgUTM[Index,Nat] / CoverPctgUTM[Index,5])
+		CoverPctgUTM[Index,Oth] = 100 * (CoverPctgUTM[Index,Oth] / CoverPctgUTM[Index,5])
+	ENDFN
+
+	// First step of Classification in Neighbour Types
+	OVER INDEX(1,MaxUTM)	
+		CoverUTM[Index,Urb] = (CoverPctgUTM[Index,Urb] >= 80)
+		CoverUTM[Index,Crp] = (CoverPctgUTM[Index,Crp] >= 80)
+		CoverUTM[Index,Nat] = (CoverPctgUTM[Index,Nat] >= 80)
+		CoverUTM[Index,Oth] = (CoverPctgUTM[Index,Oth] >= 80)
+		CoverUTM[Index,UrbCrp] = ((CoverPctgUTM[Index,Urb] >= 20) AND (CoverPctgUTM[Index,Crp] > 30) AND (CoverUTM[Index,Crp] EQ 0))
+		CoverUTM[Index,UrbNat] = ((CoverPctgUTM[Index,Urb] >= 20) AND (CoverPctgUTM[Index,Nat] > 30) AND (CoverUTM[Index,Nat] EQ 0))
+		CoverUTM[Index,CrpNat] = ((CoverPctgUTM[Index,Urb] < 20) AND (CoverPctgUTM[Index,Crp] >= 20) AND (CoverPctgUTM[Index,Nat] >= 20) AND (CoverUTM[Index,Crp] EQ 0) AND (CoverUTM[Index,Nat] EQ 0))
+		CoverUTM[Index,Tot] = CoverUTM[Index,Urb]+CoverUTM[Index,Crp]+CoverUTM[Index,Nat]+CoverUTM[Index,Oth]+CoverUTM[Index,UrbCrp]+CoverUTM[Index,UrbNat]+CoverUTM[Index,CrpNat] 
+		// Double classification of UrbNat i UrbCrp   (105 id)
+		IF (CoverUTM[Index,Tot] > 1)
+			IF CoverPctgUTM[Index,Crp] > CoverPctgUTM[Index,Nat] 
+				CoverUTM[Index,UrbNat] = 0
+			ELSE
+				CoverUTM[Index,UrbCrp] = 0
+			ENDFN
+		ENDFN
+		// Update Tot
+		CoverUTM[Index,Tot] = CoverUTM[Index,Urb]+CoverUTM[Index,Crp]+CoverUTM[Index,Nat]+CoverUTM[Index,Oth]+CoverUTM[Index,UrbCrp]+CoverUTM[Index,UrbNat]+CoverUTM[Index, CrpNat] 
+		// Count cells with assigned Interface
+		IF (CoverUTM[Index, Tot] > 0)
+			ClassOne = ClassOne + 1
+		ENDFN
+	ENDFN
+
+
+
+	// Some UTM has not been classified, so relax conditions
+	OVER INDEX(1,MaxUTM)	
+		IF CoverUTM[Index,Tot] EQ 0 
+			CoverUTM[Index,Urb] = (CoverPctgUTM[Index,Urb] >= 75)
+			CoverUTM[Index,Crp] = (CoverPctgUTM[Index,Crp] >= 75) //AND (CoverUTM[Index,CrpNat] EQ 0))
+			CoverUTM[Index,Nat] = (CoverPctgUTM[Index,Nat] >= 75) //AND (CoverUTM[Index,CrpNat] EQ 0))
+			CoverUTM[Index,Oth] = (CoverPctgUTM[Index,Oth] >= 75)
+			CoverUTM[Index,CrpNat] = ( (CoverPctgUTM[Index,Urb] < 20) AND (CoverUTM[Index,Crp] EQ 0) AND (CoverUTM[Index,Nat] EQ 0) AND ( ((CoverPctgUTM[Index,Crp] >= 15) AND (CoverPctgUTM[Index,Nat] >= 15)) OR (CoverUTM[Index,Crp]+CoverUTM[Index,Nat] >= 75))) 
+		// Update Tot
+		CoverUTM[Index,Tot] = CoverUTM[Index,Urb]+CoverUTM[Index,Crp]+CoverUTM[Index,Nat]+CoverUTM[Index,Oth]+CoverUTM[Index,UrbCrp]+CoverUTM[Index,UrbNat]+CoverUTM[Index, CrpNat] 
+		// What's the mode value of the still unclassified
+		CoverUTM[Index,IsMax] = MAX(MAX(CoverUTM[Index,Crp],CoverUTM[Index,Nat]),CoverUTM[Index,Oth])
+		// Count cells with assigned Interface
+			ClassTwo = ClassTwo + 1
+		ENDFN
+	ENDFN
+
+	// Final assignation
+	OVER INDEX(1,MaxUTM)	
+		IF CoverUTM[Index,Tot] EQ 0 
+			CoverUTM[Index,Nat] = (CoverUTM[Index,Nat] EQ CoverUTM[Index,IsMax]) 
+			CoverUTM[Index,Crp] = ((CoverUTM[Index,Crp] EQ CoverUTM[Index,IsMax]) AND (CoverUTM[Index,Nat] EQ 0))
+			CoverUTM[Index,Oth] = ((CoverUTM[Index,Oth] EQ CoverUTM[Index,IsMax]) AND (CoverUTM[Index,Nat] EQ 0) AND (CoverUTM[Index,Crp] EQ 0))
+		// Update Tot
+		CoverUTM[Index,Tot] = CoverUTM[Index,Urb]+CoverUTM[Index,Crp]+CoverUTM[Index,Nat]+CoverUTM[Index,Oth]+CoverUTM[Index,UrbCrp]+CoverUTM[Index,UrbNat]+CoverUTM[Index, CrpNat] 
+		// Count cells with assigned Interface
+		ClassThree = ClassThree + 1
+		ENDFN
+
+	ENDFN
+
+
+	// Assign NeighInterf to a spatial layer
+	OVER REGION WHOLE MAP 
+	DECISION (UTM > 0) 
+		Interface = Urb*CoverUTM[UTM,Urb]+Crp*CoverUTM[UTM,Crp]+Nat*CoverUTM[UTM,Nat]+Oth*CoverUTM[UTM,Oth]+UrbCrp*CoverUTM[UTM,UrbCrp]+UrbNat*CoverUTM[UTM,UrbNat]+CrpNat*CoverUTM[UTM,CrpNat] 
+	ENDFN
+
+/*	//Check
+	OUTPUT(TestFile)
+	Run 
+	ClassOne
+	ClassTwo
+	ClassThree
+	END*/
+
+ENDRT
+
+
+ENDEVENT
+	OVER REGION WHOLE MAP 
+		Interface=Interface*StudyArea
+	END
+
+/*	SizeLCM = 0
+	CountLCM[=] 0
+	OVER REGION WHOLE MAP
+	DECISION (LCM>0)
+		SizeLCM = SizeLCM + 1
+		CountLC[LCM] =CountLC[LCM] +1
+	END
+	SizeInterface = 0
+	CountInterface[=] 0
+	OVER REGION WHOLE MAP
+	DECISION (Interface>0)
+		SizeInterface = SizeInterface + 1
+		CountInterface[Interface] = CountInterface[Interface] + 1 	
+	ENDFN
+
+	// Check
+	OUTPUT(TestInterface)
+		Run
+		Year: FLOOR(Time/365.25) + 1
+		SizeLCM
+		SizeInterface
+		LC#1:NumLC:  CountLC[Index]
+		Interf#1:7:  CountInterface[Index]
+	END
+*/
+
+/*	OVER INDEX(MinUTM,MaxUTM)	
+	IF (CoverPctgUTM[Index,5] > 0)	// there's data on that UTM cell
+		OUTPUT(CoverPctgFile)
+			Run
+			Year: FLOOR(Time/365.25) + 1
+			UTMid:Index		
+			PctgTot: CoverPctgUTM[Index,5]
+			PctgUrb: CoverPctgUTM[Index,Urb]
+			PctgCrp: CoverPctgUTM[Index,Crp]
+			PctgNat: CoverPctgUTM[Index,Nat]
+			PctgOth: CoverPctgUTM[Index,Oth]		
+		ENDFN
+	ENDFN
+	ENDFN
+
+	OVER INDEX(MinUTM,MaxUTM)		
+	IF (CoverPctgUTM[Index,5] > 0)
+		OUTPUT(InterfaceFile)
+			Run
+			Year: FLOOR(Time/365.25) + 1
+			UTMid:Index		
+			//Data: (CoverPctgUTM[Index,5] > 0) 
+			Urb: CoverUTM[Index,Urb]
+			Crp: CoverUTM[Index,Crp]
+			Nat: CoverUTM[Index,Nat]
+			Oth: CoverUTM[Index,Oth]		
+			UrbCrp: CoverUTM[Index,UrbCrp]
+			UrbNat: CoverUTM[Index,UrbNat]
+			CrpNat: CoverUTM[Index,CrpNat]
+			Tot: CoverUTM[Index,Tot]
+			IsMax: CoverUTM[Index,IsMax]
+		ENDFN
+	ENDFN
+	ENDFN
+*/
+
+	ENDEVENT = TRUE
+ENDEE
+
+
+
+
+

@@ -1,0 +1,54 @@
+Seles Model  
+Time Units: Year Year 1 1 // 1 time unit means 1 year
+
+Landscape Events:
+	NeighFactorLCM.lse DEBUG
+	
+Spatial Constants:
+	StudyArea
+	LCM
+
+Global Constants: 
+	CellWidth = 30 // CELL WIDTH(LULC) // m					// Why CELL WIDTH doesn't work ok????!!!!
+	DaysPerYr = 365.25
+	NumLCM = 7
+	Crop = 1
+	Shrub = 2
+	Pine = 3
+	Oak = 4
+	Rocky = 5
+	Water = 6
+	Urban = 7
+
+Spatial Variables:
+	// Neighboorhoud factor (when res = 30 meters)
+	NF_Crop[60000] <- 0
+	NF_Shrub[60000] <- 0
+	NF_Pine[60000] <- 0
+	NF_Oak[60000] <- 0
+	NF_Rocky[60000] <- 0
+	NF_Urban[60000] <- 0
+
+Global Variables:
+	// Time parameters (in years)
+	TimeStep = 1 	OFF
+ 	
+	// Parameters
+	Radius = 0 // in m
+
+	// For spatial outputs
+	OutputNeigh = -1 OFF
+
+
+Output Model Frequency:
+	// Maps to output in spatial time series (when OutputStep > 0).
+	// "Relative" means the output folder is relative to where the simulation runs, not to where the model files are
+	NF_Crop Freq:OutputNeigh Filename: "asc\NF_Crop" Type: arc ascii Relative	 //Grass Compressed Relative	
+	NF_Shrub Freq:OutputNeigh Filename: "asc\NF_Shrub" Type: arc ascii Relative	 //Grass Compressed Relative	
+	NF_Pine Freq:OutputNeigh Filename: "asc\NF_Pine" Type: arc ascii Relative	 //Grass Compressed Relative	
+	NF_Oak Freq:OutputNeigh Filename: "asc\NF_Oak" Type: arc ascii Relative	 //Grass Compressed Relative	
+	NF_Rocky Freq:OutputNeigh Filename: "asc\NF_Rocky " Type: arc ascii Relative	 //Grass Compressed Relative	
+	NF_Urban Freq:OutputNeigh Filename: "asc\NF_Urban" Type: arc ascii Relative	 //Grass Compressed Relative	
+
+
+

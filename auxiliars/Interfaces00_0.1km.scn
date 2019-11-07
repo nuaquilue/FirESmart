@@ -1,0 +1,21 @@
+SELES Scenario     // To translate de land-cover map to a 4-categories INTERFACE map
+$scn$ = Interfaces00_0.1km // Point to spatial data
+$gisdata$ = ..\inputlyrs\cell
+// Load constant spatial input layers
+LCM = $gisdata$\LCM00
+UTM = $gisdata$\UTM0.1km
+StudyArea= $gisdata$\StudyArea
+// Load main model (configure state space and load landscape events)
+Model Dimensions: LCM
+InterfacesMap.sel 	
+Minimize All
+Tile
+OutputInterface = 1
+// Create new subfolders and change to output folder 
+cwd outputs\$scn$\asc
+cwd ..\cell
+cwd ..\cellhd
+cwd ..\
+// Let's start
+SimStart 1 1 
+
